@@ -158,6 +158,7 @@ export interface ComposerPromptEditorProps {
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
+  prediction?: string | null;
   ariaLabel?: string | undefined;
   suggestionListId?: string | undefined;
   activeSuggestionId?: string | undefined;
@@ -939,6 +940,7 @@ function ComposerPromptEditorTiptapInner(
     skills,
     disabled,
     placeholder,
+    prediction,
     ariaLabel,
     suggestionListId,
     activeSuggestionId,
@@ -977,6 +979,7 @@ function ComposerPromptEditorTiptapInner(
     onCommandKeyDown,
     isPathQueryActive,
     importContextFragment,
+    prediction: disabled || contextRecords.size > 0 ? null : prediction,
   }));
 
   // Stable so a skills refresh does not rerun the controlled-value effect.
@@ -1114,6 +1117,24 @@ function ComposerPromptEditorTiptapInner(
       editorProps: {
         attributes: editorAttributes,
         handleKeyDown: (view, event) => {
+          const predictedMessage = readCallbacks().prediction;
+          if (
+            predictedMessage &&
+            latestValueRef.current.length === 0 &&
+            view.state.doc.textContent.length === 0 &&
+            event.key === "Tab" &&
+            !event.shiftKey &&
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.altKey &&
+            !event.isComposing &&
+            !view.composing
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            view.dispatch(view.state.tr.insertText(predictedMessage));
+            return true;
+          }
           // In a right-to-left line the start is on the right.
           const backArrow = caretLineDirection(view.state) === "rtl" ? "ArrowRight" : "ArrowLeft";
           const boundary = event.metaKey
@@ -1818,14 +1839,19 @@ function ComposerPromptEditorTiptapInner(
               onCopyCapture={(event) => handleCopyCut(event, false)}
               onCutCapture={(event) => handleCopyCut(event, true)}
             />
-            {isEmpty && contextRecords.size === 0 && placeholder ? (
+            {isEmpty && contextRecords.size === 0 && (prediction || placeholder) ? (
               <div
+                data-testid={!disabled && prediction ? "composer-prediction" : undefined}
                 className={cn(
                   "pointer-events-none absolute inset-0 leading-relaxed text-placeholder",
+                  prediction && "line-clamp-2",
                   placeholderClassName,
                 )}
               >
-                {placeholder}
+                {(!disabled && prediction) || placeholder}
+                {!disabled && prediction ? (
+                  <span className="sr-only"> Press Tab to accept this suggestion.</span>
+                ) : null}
               </div>
             ) : null}
           </div>

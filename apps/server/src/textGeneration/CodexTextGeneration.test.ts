@@ -196,6 +196,35 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
+  it.effect.each([
+    { prediction: "  Show me a concrete example.  ", expected: "Show me a concrete example." },
+    { prediction: null, expected: null },
+    { prediction: "   ", expected: null },
+  ])(
+    "predicts one user follow-up through the configured ephemeral Codex connection: %j",
+    ({ prediction, expected }) =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ prediction }),
+          requireArg: "--ephemeral",
+          stdinMustContain: "assistant: The migration is ready for review.",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generate = textGeneration.generateComposerPrediction;
+            expect(generate).toBeDefined();
+            if (!generate) return;
+            const result = yield* generate({
+              cwd: process.cwd(),
+              context:
+                "user: Explain the migration.\nassistant: The migration is ready for review.",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(result).toEqual({ prediction: expected });
+          }),
+      ),
+  );
+
   it.effect.each(["exec", "mcp list"] as const)(
     "kills a stalled %s CLI when its request is interrupted",
     (command) =>

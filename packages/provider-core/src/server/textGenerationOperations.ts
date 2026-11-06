@@ -12,6 +12,7 @@ import {
   buildPrContentPrompt,
   buildReviewGuidePrompt,
   buildThreadTitlePrompt,
+  buildComposerPredictionPrompt,
 } from "./textGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -168,6 +169,15 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
   });
 
   return {
+    generateComposerPrediction: Effect.fn(`${name}.generateComposerPrediction`)(function* (input) {
+      const result = yield* run({
+        operation: "generateComposerPrediction",
+        cwd: input.cwd,
+        modelSelection: input.modelSelection,
+        ...buildComposerPredictionPrompt(input.context),
+      });
+      return { prediction: result.prediction?.trim() || null };
+    }),
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
