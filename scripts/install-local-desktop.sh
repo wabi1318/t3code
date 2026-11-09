@@ -57,6 +57,11 @@ if [[ -e "$destination" ]]; then
 fi
 mv "$stage_dir/T3 Code (Beta).app" "$destination"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$destination"
+if [[ -e "$backup_dir/T3 Code (Beta).app" ]]; then
+  /usr/bin/trash "$backup_dir/T3 Code (Beta).app"
+fi
+rmdir "$backup_dir"
+backup_dir=''
 echo "Installed: $destination"
-echo "Backup: $backup_dir"
+echo 'Previous version moved to Trash if present.'
 echo 'Quit and reopen T3 Code to use this build. The running app was not restarted.'
