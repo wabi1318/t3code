@@ -114,14 +114,12 @@ import {
   filePreviewReadErrorMessage,
   isMarkdownPreviewFile,
   resolveFilePreviewPath,
-  setMarkdownTaskChecked,
   shouldShowFileExplorer,
   workspaceAssetResource,
 } from "./filePreviewMode";
 import { changeFileSaveSession, useFileSaveSession } from "./fileSaveSessions";
 import { revisionedQuery } from "~/state/revisionedQuery";
 import {
-  getOptimisticProjectFileQueryData,
   getProjectFileContents,
   getProjectFileQueryAtom,
   setProjectFileQueryData,
@@ -129,6 +127,7 @@ import {
 } from "./projectFilesQueryState";
 
 const NO_FILE_REVISION_ATOM = Atom.make(null);
+const FileMarkdownEditor = lazy(() => import("./FileMarkdownEditor"));
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -940,28 +939,34 @@ function RenderedMarkdownSurface({
   const saveTarget = { environmentId, cwd, relativePath };
   useFileSaveSession(saveTarget, onPendingChange);
 
+  const saveContents = (nextContents: string) => {
+    if (nextContents === getProjectFileContents(environmentId, cwd, relativePath)) return;
+    setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
+    changeFileSaveSession(saveTarget, nextContents);
+  };
+
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <FileMarkdownPreview
-        text={contents}
-        cwd={cwd}
-        relativePath={relativePath}
-        threadRef={threadRef}
-        workspaceMutationId={workspaceMutationId}
-        onTaskListChange={
-          readOnly
-            ? undefined
-            : ({ markerOffset, checked }) => {
-                const currentContents =
-                  getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
-                  contents;
-                const nextContents = setMarkdownTaskChecked(currentContents, markerOffset, checked);
-                if (nextContents === currentContents) return;
-                setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
-                changeFileSaveSession(saveTarget, nextContents);
-              }
-        }
-      />
+      {readOnly ? (
+        <FileMarkdownPreview
+          text={contents}
+          cwd={cwd}
+          relativePath={relativePath}
+          threadRef={threadRef}
+          workspaceMutationId={workspaceMutationId}
+        />
+      ) : (
+        <Suspense fallback={<FileSurfaceLoading />}>
+          <FileMarkdownEditor
+            text={contents}
+            cwd={cwd}
+            relativePath={relativePath}
+            threadRef={threadRef}
+            workspaceMutationId={workspaceMutationId}
+            onChange={saveContents}
+          />
+        </Suspense>
+      )}
     </ScrollArea>
   );
 }
