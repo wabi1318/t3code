@@ -57,8 +57,21 @@ if [[ -e "$destination" ]]; then
 fi
 mv "$stage_dir/T3 Code (Beta).app" "$destination"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$destination"
-if [[ -e "$backup_dir/T3 Code (Beta).app" ]]; then
-  /usr/bin/trash "$backup_dir/T3 Code (Beta).app"
+if [[ -e "$backup_dir/T3 Code (Beta).app" || -L "$backup_dir/T3 Code (Beta).app" ]]; then
+  if [[ -x /usr/bin/trash ]]; then
+    /usr/bin/trash -s "$backup_dir/T3 Code (Beta).app"
+  else
+    /usr/bin/osascript -l JavaScript - "$backup_dir/T3 Code (Beta).app" <<'JXA'
+ObjC.import('Foundation');
+function run(args) {
+  const error = Ref();
+  const previousApp = $.NSURL.fileURLWithPath(args[0]);
+  if (!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError(previousApp, null, error)) {
+    throw new Error(ObjC.unwrap(error[0].localizedDescription));
+  }
+}
+JXA
+  fi
 fi
 rmdir "$backup_dir"
 backup_dir=''

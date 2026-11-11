@@ -262,8 +262,11 @@ to retain packaging files for inspection. Run `vp run dist:desktop:artifact --he
 options.
 
 On macOS, run `vp run app-sync` to build this checkout and replace
-`/Applications/T3 Code (Beta).app`. The previous app is kept under
-`~/Library/Application Support/T3-local-build-backups/`. The local app has no
+`/Applications/T3 Code (Beta).app`. After the replacement is registered, the previous
+app moves to Trash, including on macOS versions without the `trash` command. Older
+backups from earlier runs are not removed automatically; use Finder to move unwanted
+`T3 Code (Beta).app` bundles under `~/Library/Application Support/T3-local-build-backups/`
+to Trash once, so Spotlight no longer offers them. The local app has no
 automatic update feed. Quit and reopen T3 Code after the command finishes;
 the command does not restart the running app or change its conversation data.
 
