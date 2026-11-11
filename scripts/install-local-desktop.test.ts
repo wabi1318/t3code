@@ -82,6 +82,9 @@ it.each([
       )
       .replaceAll("/usr/bin/trash", NodePath.join(bin, "trash"))
       .replaceAll("/usr/bin/osascript", NodePath.join(bin, "osascript"));
+    expect(source).toContain(`destination=${quote(destination)}`);
+    expect(source).toContain(`backup_root=${quote(backup)}`);
+    expect(source).toContain(quote(NodePath.join(applications, ".t3-local-install.XXXXXX")));
     const installer = NodePath.join(root, "scripts/install-local-desktop.sh");
     await NodeFSP.writeFile(installer, source);
     const result = NodeChildProcess.spawnSync("bash", [installer], {
