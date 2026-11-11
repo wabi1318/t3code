@@ -584,7 +584,12 @@ export const make = Effect.gen(function* () {
                     Effect.flatMap((link) =>
                       link === null ? Effect.void : electronShell.copyText(link),
                     ),
-                    Effect.catch(() => logWindowWarning("failed to copy selection link")),
+                    Effect.catch((error) =>
+                      logWindowWarning("failed to copy selection link", {
+                        message: error.message,
+                        cause: error.cause,
+                      }),
+                    ),
                   ),
                 );
               },

@@ -2,10 +2,11 @@ import * as NodeVM from "node:vm";
 import { expect, it, vi } from "vite-plus/test";
 import { createContextMenuSelectionLink } from "./ContextMenuSelectionLink.ts";
 
-function createFrame(href: string) {
+function createFrame(href: string, pageGlobals: Record<string, unknown> = {}) {
   const selection = { isCollapsed: false, rangeCount: 1 };
   const generateDirective = vi.fn(async () => "text=Later-,repeated%20phrase,-there.");
   const frame = {
+    url: href,
     isDestroyed: vi.fn(() => false),
     executeJavaScript: async (script: string): Promise<unknown> =>
       NodeVM.runInNewContext(script, {
@@ -15,6 +16,7 @@ function createFrame(href: string) {
           getSelection: () => selection,
           fragmentDirective: { createSelectorDirective: generateDirective },
         },
+        ...pageGlobals,
       }),
   };
   return { frame, selection, generateDirective };
@@ -37,6 +39,54 @@ it.each([
   const { frame } = createFrame(href);
   expect(await createContextMenuSelectionLink(frame)).toBe(expected);
 });
+
+it.each([
+  ["javascript:alert(1)", null],
+  ["data:text/html,selected", null],
+  ["not a URL", null],
+  ["https://attacker.example/article#:~:text=selected", null],
+  ["http://example.com/article#:~:text=selected", null],
+  ["https://example.com/other#:~:text=selected", null],
+  ["https://example.com/article?other=true#:~:text=selected", null],
+  [
+    Object.assign(new URL("https://example.com/article#:~:text=selected"), {
+      username: "test-user",
+    }).href,
+    null,
+  ],
+  [
+    "https://example.com:443/article#:~:text=selected",
+    "https://example.com/article#:~:text=selected",
+  ],
+  [
+    "https://exam\nple.com/article#:~:text=selected",
+    "https://example.com/article#:~:text=selected",
+  ],
+])("validates page-supplied selection links: %s", async (forgedLink, expected) => {
+  const { frame } = createFrame("https://example.com/article", {
+    URL: class {
+      protocol = "https:";
+      hash = "";
+      href = forgedLink;
+    },
+  });
+  expect(await createContextMenuSelectionLink(frame)).toBe(expected);
+});
+
+it.each([
+  ["https://example.com/another-page", null],
+  ["https://example.com/article#section", "https://example.com/article#:~:text=selected"],
+] as const)(
+  "checks the current source page after navigation to %s",
+  async (currentUrl, expected) => {
+    const { frame, generateDirective } = createFrame("https://example.com/article");
+    generateDirective.mockImplementation(async () => {
+      frame.url = currentUrl;
+      return "text=selected";
+    });
+    expect(await createContextMenuSelectionLink(frame)).toBe(expected);
+  },
+);
 
 it.each(["about:blank", "file:///article.html", "data:text/html,article"])(
   "does not create a shareable selection link for %s",
