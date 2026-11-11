@@ -35,22 +35,43 @@ it("shows a prediction when a newly completed run becomes eligible later", async
   await expect.element(screen.getByRole("status")).toHaveTextContent("Show an example");
 });
 
-it("retries an interrupted prediction and ignores its stale response", async () => {
+it("keeps one pending prediction while input temporarily disables it", async () => {
   state.generate.mockReset();
   let resolveInterrupted!: (result: PredictionResult) => void;
   const interrupted = new Promise<PredictionResult>((resolve) => {
     resolveInterrupted = resolve;
   });
-  state.generate
-    .mockReturnValueOnce(interrupted)
-    .mockResolvedValue(AsyncResult.success({ prediction: "Current prediction" }));
+  state.generate.mockReturnValue(interrupted);
   await using screen = await render(<Prediction enabled completedRunId={null} />);
   await screen.rerender(<Prediction enabled completedRunId={completedRunId} />);
   await vi.waitFor(() => expect(state.generate).toHaveBeenCalledOnce());
   await screen.rerender(<Prediction enabled={false} completedRunId={completedRunId} />);
   await screen.rerender(<Prediction enabled completedRunId={completedRunId} />);
-  await expect.element(screen.getByRole("status")).toHaveTextContent("Current prediction");
-  resolveInterrupted(AsyncResult.success({ prediction: "Stale prediction" }));
+  expect(state.generate).toHaveBeenCalledOnce();
+  await screen.rerender(<Prediction enabled={false} completedRunId={completedRunId} />);
+  resolveInterrupted(AsyncResult.success({ prediction: "Current prediction" }));
   await interrupted;
+  await expect.element(screen.getByRole("status")).toHaveTextContent("No prediction");
+  await screen.rerender(<Prediction enabled completedRunId={completedRunId} />);
+  await expect.element(screen.getByRole("status")).toHaveTextContent("Current prediction");
+  expect(state.generate).toHaveBeenCalledOnce();
+});
+
+it("ignores a pending response after a newer run completes", async () => {
+  state.generate.mockReset();
+  let resolvePrevious!: (result: PredictionResult) => void;
+  const previous = new Promise<PredictionResult>((resolve) => {
+    resolvePrevious = resolve;
+  });
+  state.generate
+    .mockReturnValueOnce(previous)
+    .mockResolvedValue(AsyncResult.success({ prediction: "Current prediction" }));
+  await using screen = await render(<Prediction enabled completedRunId={null} />);
+  await screen.rerender(<Prediction enabled completedRunId={completedRunId} />);
+  await vi.waitFor(() => expect(state.generate).toHaveBeenCalledOnce());
+  await screen.rerender(<Prediction enabled completedRunId={RunId.make("run:newer")} />);
+  await expect.element(screen.getByRole("status")).toHaveTextContent("Current prediction");
+  resolvePrevious(AsyncResult.success({ prediction: "Stale prediction" }));
+  await previous;
   await expect.element(screen.getByRole("status")).toHaveTextContent("Current prediction");
 });

@@ -13,7 +13,7 @@ export function useComposerPrediction(input: {
   const key = `${environmentId}:${threadId ?? ""}`;
   const observed = useRef({ key, runId: completedRunId });
   const [result, setResult] = useState<{ key: string; runId: RunId; text: string } | null>(null);
-  if (result && (!enabled || result.key !== key || result.runId !== completedRunId)) {
+  if (result && (result.key !== key || result.runId !== completedRunId)) {
     setResult(null);
   }
   const generate = useAtomCommand(generateComposerPrediction, {
@@ -22,7 +22,7 @@ export function useComposerPrediction(input: {
   });
   const request = useEffectEvent(generate);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- requests an external model once for a newly completed run and rejects results after navigation or input
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- requests an external model once per newly completed run and retains its result while input temporarily hides it
   useEffect(() => {
     if (observed.current.key !== key) {
       observed.current = { key, runId: completedRunId };
@@ -30,24 +30,21 @@ export function useComposerPrediction(input: {
     }
     if (completedRunId === null || observed.current.runId === completedRunId) return;
     if (!enabled || threadId === null) return;
-    observed.current.runId = completedRunId;
-    let current = true;
-    let settled = false;
+    const observation = { key, runId: completedRunId };
+    observed.current = observation;
     void request({ environmentId, input: { threadId, runId: completedRunId } }).then((response) => {
-      settled = true;
-      if (current && response._tag === "Success" && response.value.prediction) {
+      if (
+        observed.current === observation &&
+        response._tag === "Success" &&
+        response.value.prediction
+      ) {
         setResult({ key, runId: completedRunId, text: response.value.prediction });
       }
     });
-    return () => {
-      current = false;
-      if (!settled) observed.current.runId = null;
-    };
   }, [key, environmentId, threadId, completedRunId, enabled]);
 
   return {
     prediction:
       enabled && result?.key === key && result.runId === completedRunId ? result.text : null,
-    dismiss: () => setResult(null),
   };
 }

@@ -902,31 +902,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
-  const { prediction: composerPrediction, dismiss: dismissComposerPrediction } =
-    useComposerPrediction({
-      environmentId,
-      threadId: activeThreadId,
-      completedRunId:
-        phase !== "running" && !isSendBusy && activeThread?.latestRun?.status === "completed"
-          ? activeThread.latestRun.runId
-          : null,
-      enabled:
-        canOperateThread &&
-        selectedProvider === "codex" &&
-        prompt.length === 0 &&
-        phase !== "running" &&
-        !isSendBusy &&
-        !isCompacting &&
-        !isRevertingCheckpoint &&
-        environmentUnavailable === null &&
-        pendingUserInputs.length === 0 &&
-        pendingApprovals.length === 0 &&
-        !showPlanFollowUpPrompt &&
-        editingQueuedAttachments === null &&
-        composerImages.length === 0 &&
-        composerFiles.length === 0 &&
-        composerTerminalContexts.length === 0,
-    });
+  const { prediction: composerPrediction } = useComposerPrediction({
+    environmentId,
+    threadId: activeThreadId,
+    completedRunId:
+      phase !== "running" && !isSendBusy && activeThread?.latestRun?.status === "completed"
+        ? activeThread.latestRun.runId
+        : null,
+    enabled:
+      canOperateThread &&
+      selectedProvider === "codex" &&
+      prompt.length === 0 &&
+      phase !== "running" &&
+      !isSendBusy &&
+      !isCompacting &&
+      !isRevertingCheckpoint &&
+      environmentUnavailable === null &&
+      pendingUserInputs.length === 0 &&
+      pendingApprovals.length === 0 &&
+      !showPlanFollowUpPrompt &&
+      editingQueuedAttachments === null &&
+      composerImages.length === 0 &&
+      composerFiles.length === 0 &&
+      composerTerminalContexts.length === 0,
+  });
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
   const providerSetupInstanceId = noProviderAvailable
@@ -1622,7 +1621,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cursorAdjacentToMention: boolean,
     contextIds: string[],
   ) => {
-    dismissComposerPrediction();
     refreshWorkspaceSnapshotOnTyping();
     if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
       if (activePendingProgress.activeQuestion.allowCustomAnswer === false) return;
