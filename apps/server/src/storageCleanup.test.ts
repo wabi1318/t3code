@@ -2174,11 +2174,29 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
-  it.live("compares the checked-out branch without a full status", () =>
+  it.live.each([
+    "fatal: not a git repository",
+    "fatal: gitfile does not point to a valid repository",
+  ])("compares the checked-out branch without a full status: %s", (diagnostic) =>
     runCleanupTest(
       Effect.gen(function* () {
+        const git = yield* GitVcsDriver.GitVcsDriver;
         const { service, fs, repo, worktree, command, setThreads, fullStatusCalls } =
-          yield* cleanupFixture();
+          yield* cleanupFixture().pipe(
+            Effect.provideService(GitVcsDriver.GitVcsDriver, {
+              ...git,
+              execute: (input) =>
+                git
+                  .execute(input)
+                  .pipe(
+                    Effect.map((result) =>
+                      input.operation === "StorageCleanup.branchChanged" && result.exitCode > 1
+                        ? { ...result, stderr: diagnostic }
+                        : result,
+                    ),
+                  ),
+            }),
+          );
         const changed = { outcome: "kept", reason: "Repository or branch changed" };
         yield* command(worktree, ["checkout", "--detach"]);
         expect((yield* service.runNow).entries[0]).toMatchObject(changed);
