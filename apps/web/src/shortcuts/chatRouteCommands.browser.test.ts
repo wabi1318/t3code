@@ -1,5 +1,8 @@
 import type { AnyRouter } from "@tanstack/react-router";
 import { describe, expect, it } from "vite-plus/test";
+import { render } from "../../test/render";
+import { createElement } from "react";
+import { subscribeBrowserFind } from "../browser/browserFind";
 
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { installChatRouteCommands } from "./chatRouteCommands";
@@ -33,6 +36,39 @@ function selectThread(threadKey: string) {
 }
 
 describe("chat route commands", () => {
+  it("opens find in the focused native browser and leaves streamed tabs alone", async () => {
+    const { router } = routerAt(CHAT);
+    using stack = new DisposableStack();
+    stack.defer(installChatRouteCommands(router));
+    let opened = 0;
+    stack.defer(subscribeBrowserFind("native-tab", () => opened++));
+    await using screen = await render(
+      createElement(
+        "section",
+        { "data-preview-panel-mode": "embedded", "data-browser-find-tab": "native-tab" },
+        createElement("input", { "aria-label": "Browser URL" }),
+      ),
+    );
+    const input = screen.getByRole("textbox", { name: "Browser URL" }).element();
+    input.focus();
+    const pressFind = () => {
+      const event = new KeyboardEvent("keydown", {
+        key: "f",
+        metaKey: /Mac/u.test(navigator.platform),
+        ctrlKey: !/Mac/u.test(navigator.platform),
+        bubbles: true,
+        cancelable: true,
+      });
+      input.dispatchEvent(event);
+      return event;
+    };
+    expect(pressFind().defaultPrevented).toBe(true);
+    expect(opened).toBe(1);
+    input.parentElement!.removeAttribute("data-browser-find-tab");
+    expect(pressFind().defaultPrevented).toBe(false);
+    expect(opened).toBe(1);
+  });
+
   it("clears a selection made after install, reading the store at keypress time", () => {
     const { router } = routerAt(CHAT);
     using stack = new DisposableStack();

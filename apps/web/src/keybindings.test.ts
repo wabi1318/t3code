@@ -285,6 +285,26 @@ const DEFAULT_BINDINGS = compile([
 ]);
 
 describe("effectiveShortcutsForCommand", () => {
+  it("selects page or thread find from focus on macOS and Windows", () => {
+    for (const platform of ["MacIntel", "Win32"]) {
+      const key = event({
+        key: "f",
+        metaKey: platform === "MacIntel",
+        ctrlKey: platform === "Win32",
+      });
+      for (const [context, expected] of [
+        [{ previewFocus: true }, "preview.find"],
+        [{ previewFocus: false }, "chat.find"],
+        [{ terminalFocus: true }, null],
+      ] as const) {
+        assert.equal(
+          resolveShortcutCommand(key, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+          expected,
+        );
+      }
+    }
+  });
+
   it("passes only effective preview shortcuts to the desktop bridge", () => {
     const reopen = modShortcut("t", { shiftKey: true });
     const second = modShortcut("y", { shiftKey: true });
