@@ -123,6 +123,13 @@ describe("rendered Markdown documents", () => {
     ]);
     expect(serializeFileMarkdown(document, parsed)).toBe("First\n\nSecond\n");
     expect(serializeFileMarkdown(parsed.document, parsed)).toBe("First\n");
+
+    const formula = parseFileMarkdown("$$x^2$$\n", schema);
+    const inserted = formula.document.firstChild!;
+    const copied = schema.nodes.doc!.create(null, [
+      inserted.type.create({ ...inserted.attrs, sourceId: null }, inserted.content),
+    ]);
+    expect(serializeFileMarkdown(copied, formula)).toBe("$$x^2$$\n");
   });
 
   it("keeps multiline HTML inside an edited quote without duplicating quote markers or carriage returns", () => {

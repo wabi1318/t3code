@@ -109,19 +109,19 @@ export const fileMarkdownExtensions: Extensions = [
           "fileMarkdownTable",
           "fileMarkdownRawBlock",
         ],
-        attributes: { sourceId: { default: null, rendered: false } },
+        attributes: { sourceId: { default: null } },
       },
       {
         types: ["bulletList", "orderedList", "taskList"],
         attributes: {
-          bullet: { default: "-", rendered: false },
-          delimiter: { default: ".", rendered: false },
-          spread: { default: false, rendered: false },
+          bullet: { default: "-" },
+          delimiter: { default: "." },
+          spread: { default: false },
         },
       },
       {
         types: ["listItem", "taskItem"],
-        attributes: { spread: { default: false, rendered: false } },
+        attributes: { spread: { default: false } },
       },
       { types: ["codeBlock"], attributes: { meta: { default: null, rendered: false } } },
     ],
@@ -148,6 +148,8 @@ function originalSource(node: RootContent | PhrasingContent, source: string): st
   if (node.type === "html") return node.value;
   if (node.type === "code") return toMarkdown(node, { fences: true }).replace(/\n$/, "");
   if (node.type === "math") {
+    if (node.position && node.position.start.line === node.position.end.line)
+      return source.slice(node.position.start.offset, node.position.end.offset);
     const opening = source.slice(node.position?.start.offset).split(/\r?\n/)[0]!;
     const closing = /^\$+/.exec(opening)?.[0] ?? "$$";
     return `${opening}\n${node.value}\n${closing}`;
