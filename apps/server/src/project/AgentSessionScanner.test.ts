@@ -122,7 +122,7 @@ const runRecentThreads = (input: ScannerTestInput & { readonly workspaceRoot: st
 
 const makeTempDir = Effect.fn("AgentSessionScanner.test.makeTempDir")(function* (prefix: string) {
   const fileSystem = yield* FileSystem.FileSystem;
-  return yield* fileSystem.makeTempDirectoryScoped({ prefix });
+  return yield* fileSystem.realPath(yield* fileSystem.makeTempDirectoryScoped({ prefix }));
 });
 
 const writeTranscript = Effect.fn("AgentSessionScanner.test.writeTranscript")(function* (input: {
@@ -1932,7 +1932,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
 
-    it.effect("still reads the git identity of repositories next to a blocked one", () =>
+    it.live("still reads the git identity of repositories next to a blocked one", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -1964,7 +1964,6 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
           const result = yield* Effect.scoped(
             Effect.gen(function* () {
               yield* awaitGateReader(path.join(repos[1], ".git", "config"));
-              yield* TestClock.adjust("2 seconds");
               return yield* Fiber.join(scan);
             }),
           );

@@ -5,7 +5,7 @@ import { resolveShortcutCommand } from "./keybindings";
 import * as editableFocus from "./lib/editableFocus";
 
 function setupFocus() {
-  const editor = new EventTarget();
+  const editor = Object.assign(new EventTarget(), { closest: () => null });
   const other = new EventTarget();
   vi.stubGlobal("document", { activeElement: editor });
   const focus = vi
