@@ -6,13 +6,14 @@ import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import type { BlockContent, Literal, PhrasingContent, RootContent } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
-import { toMarkdown } from "mdast-util-to-markdown";
+import { defaultHandlers, toMarkdown } from "mdast-util-to-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 
 import { maskMarkdownFrontmatter } from "@t3tools/shared/markdownFrontmatter";
+import { setMarkdownTaskChecked } from "./filePreviewMode";
 
 interface RawMarkdown extends Literal {
   type: "fileMarkdownRaw";
@@ -20,6 +21,10 @@ interface RawMarkdown extends Literal {
 }
 
 declare module "mdast" {
+  interface ListData {
+    fileMarkdownBullet?: "-" | "+" | "*";
+    fileMarkdownDelimiter?: "." | ")";
+  }
   interface BlockContentMap {
     fileMarkdownRaw: RawMarkdown;
   }
@@ -106,6 +111,18 @@ export const fileMarkdownExtensions: Extensions = [
         ],
         attributes: { sourceId: { default: null, rendered: false } },
       },
+      {
+        types: ["bulletList", "orderedList", "taskList"],
+        attributes: {
+          bullet: { default: "-", rendered: false },
+          delimiter: { default: ".", rendered: false },
+          spread: { default: false, rendered: false },
+        },
+      },
+      {
+        types: ["listItem", "taskItem"],
+        attributes: { spread: { default: false, rendered: false } },
+      },
       { types: ["codeBlock"], attributes: { meta: { default: null, rendered: false } } },
     ],
   }),
@@ -115,6 +132,7 @@ interface SourceBlock {
   readonly node: DocumentNode;
   readonly source: string;
   readonly before: string;
+  readonly taskMarkers: ReadonlyArray<number>;
 }
 
 export interface FileMarkdownDocument {
@@ -144,16 +162,8 @@ function parseInline(nodes: ReadonlyArray<PhrasingContent>, source: string): JSO
     if (node.type === "html" && /^<br\s*\/?>$/i.test(node.value)) return [{ type: "hardBreak" }];
     if (node.type === "inlineCode")
       return [{ type: "text", text: node.value, marks: [{ type: "code" }] }];
-    if (
-      node.type === "strong" ||
-      node.type === "emphasis" ||
-      node.type === "delete" ||
-      node.type === "link"
-    ) {
-      const mark =
-        node.type === "link"
-          ? { type: "link", attrs: { href: node.url, title: node.title } }
-          : { type: { strong: "bold", emphasis: "italic", delete: "strike" }[node.type] };
+    if (node.type === "strong" || node.type === "emphasis" || node.type === "delete") {
+      const mark = { type: { strong: "bold", emphasis: "italic", delete: "strike" }[node.type] };
       return parseInline(node.children, source).map((child) => ({
         ...child,
         marks: [mark, ...(child.marks ?? [])],
@@ -186,20 +196,20 @@ function parseBlock(node: RootContent, source: string): JSONContent {
           : node.children.every((item) => item.checked !== null && item.checked !== undefined)
             ? "taskList"
             : "bulletList",
-        attrs: { start: node.start ?? 1 },
+        attrs: {
+          start: node.start ?? 1,
+          bullet: source[node.position!.start.offset!] ?? "-",
+          delimiter: /^\d+([.)])/.exec(source.slice(node.position!.start.offset!))?.[1] ?? ".",
+          spread: node.spread ?? false,
+        },
         content: node.children.map((item) => ({
           type: typeof item.checked === "boolean" ? "taskItem" : "listItem",
-          attrs: { checked: item.checked },
+          attrs: { checked: item.checked, spread: item.spread ?? false },
           content: item.children.map((child) => parseBlock(child, source)),
         })),
       };
     case "code":
-      if (node.lang === "mermaid") break;
-      return {
-        type: "codeBlock",
-        attrs: { language: node.lang, meta: node.meta },
-        content: node.value ? [{ type: "text", text: node.value }] : [],
-      };
+      break;
     case "thematicBreak":
       return { type: "horizontalRule" };
     case "table":
@@ -216,6 +226,24 @@ function parseBlock(node: RootContent, source: string): JSONContent {
       };
   }
   return { type: "fileMarkdownRawBlock", attrs: { source: originalSource(node, source) } };
+}
+
+function taskMarkerOffsets(nodes: ReadonlyArray<RootContent>, source: string): number[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "blockquote") return taskMarkerOffsets(node.children, source);
+    if (node.type !== "list") return [];
+    return node.children.flatMap((item) => {
+      const start = item.position!.start.offset!;
+      const marker =
+        typeof item.checked === "boolean"
+          ? /^(?:[*+-]|\d+[.)])[ \t]+\[/.exec(source.slice(start))
+          : null;
+      return [
+        ...(marker ? [start + marker[0].length - 1] : []),
+        ...taskMarkerOffsets(item.children, source),
+      ];
+    });
+  });
 }
 
 export function parseFileMarkdown(source: string, schema: Schema): FileMarkdownDocument {
@@ -240,6 +268,7 @@ export function parseFileMarkdown(source: string, schema: Schema): FileMarkdownD
       node,
       source: source.slice(start, nextEnd),
       before: source.slice(end, start),
+      taskMarkers: taskMarkerOffsets([original], source).map((offset) => offset - start),
     });
     end = nextEnd;
   });
@@ -328,7 +357,7 @@ function blockMarkdown(node: DocumentNode): BlockContent {
         children.push({
           type: "listItem",
           checked: item.type.name === "taskItem" ? item.attrs.checked : null,
-          spread: false,
+          spread: item.attrs.spread === true,
           children: childBlocks(item),
         }),
       );
@@ -336,7 +365,12 @@ function blockMarkdown(node: DocumentNode): BlockContent {
         type: "list",
         ordered: node.type.name === "orderedList",
         start: node.attrs.start ?? 1,
-        spread: false,
+        spread: node.attrs.spread === true,
+        data: {
+          fileMarkdownBullet:
+            node.attrs.bullet === "+" || node.attrs.bullet === "*" ? node.attrs.bullet : "-",
+          fileMarkdownDelimiter: node.attrs.delimiter === ")" ? ")" : ".",
+        },
         children,
       };
     }
@@ -363,6 +397,39 @@ function blockMarkdown(node: DocumentNode): BlockContent {
   }
 }
 
+function hasOnlyTaskCheckChanges(node: DocumentNode, original: DocumentNode): boolean {
+  const originalAttributes =
+    node.type.name === "taskItem"
+      ? { ...original.attrs, checked: node.attrs.checked }
+      : original.attrs;
+  if (
+    !node.hasMarkup(original.type, originalAttributes, original.marks) ||
+    node.text !== original.text ||
+    node.childCount !== original.childCount
+  )
+    return false;
+  for (let index = 0; index < node.childCount; index += 1) {
+    if (!hasOnlyTaskCheckChanges(node.child(index), original.child(index))) return false;
+  }
+  return true;
+}
+
+function serializeTaskChecks(node: DocumentNode, original: SourceBlock): string | undefined {
+  if (!hasOnlyTaskCheckChanges(node, original.node)) return undefined;
+  const checks: boolean[] = [];
+  node.descendants((child) => {
+    if (child.type.name === "taskItem") checks.push(child.attrs.checked === true);
+  });
+  if (checks.length !== original.taskMarkers.length) return undefined;
+  return original.taskMarkers.reduce(
+    (source, offset, index) =>
+      /[xX]/.test(source[offset + 1] ?? "") === checks[index]
+        ? source
+        : setMarkdownTaskChecked(source, offset, checks[index]!),
+    original.source,
+  );
+}
+
 export function serializeFileMarkdown(
   document: DocumentNode,
   original: FileMarkdownDocument,
@@ -376,14 +443,44 @@ export function serializeFileMarkdown(
     const before = index === 0 ? "" : block?.before || original.newline + original.newline;
     const source = block?.node.eq(node)
       ? block.source
-      : toMarkdown(blockMarkdown(node), {
+      : ((block ? serializeTaskChecks(node, block) : undefined) ??
+        toMarkdown(blockMarkdown(node), {
           extensions: [gfmToMarkdown()],
-          bullet: "-",
-          handlers: { fileMarkdownRaw: (raw) => raw.value },
+          handlers: {
+            fileMarkdownRaw: (raw) => raw.value,
+            listItem: (item, parent, state, info) => {
+              const checkable =
+                typeof item.checked === "boolean" && item.children[0]?.type === "paragraph";
+              const checkbox = `[${item.checked ? "x" : " "}] `;
+              const tracker = state.createTracker(info);
+              if (checkable) tracker.move(checkbox);
+              const value = defaultHandlers.listItem(item, parent, state, {
+                ...info,
+                ...tracker.current(),
+              });
+              // 項目番号が「)」で終わる場合も、保存時にチェックを保持する。
+              return checkable
+                ? value.replace(/^(?:[*+-]|\d+[.)])([\r\n]| {1,3})/, `$&${checkbox}`)
+                : value;
+            },
+            list: (list, parent, state, info) => {
+              const previous = state.options;
+              state.options = {
+                ...previous,
+                bullet: list.data?.fileMarkdownBullet ?? previous.bullet,
+                bulletOrdered: list.data?.fileMarkdownDelimiter ?? previous.bulletOrdered,
+              };
+              try {
+                return defaultHandlers.list(list, parent, state, info);
+              } finally {
+                state.options = previous;
+              }
+            },
+          },
         })
           .replace(/\n$/, "")
           .replace(/\r\n?/g, "\n")
-          .replace(/\n/g, original.newline);
+          .replace(/\n/g, original.newline));
     parts.push(before, source);
   });
   return original.prefix + parts.join("") + original.suffix;

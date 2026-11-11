@@ -87,6 +87,31 @@ describe("rendered Markdown documents", () => {
     const reread = parseFileMarkdown(saved, schema);
     expect(reread.document.child(0).child(1).child(1).textContent).toBe("2 | 3Next line");
     expect(reread.document.child(1).child(0).attrs.checked).toBe(true);
+
+    for (const source of [
+      "+ [ ] First\n+ [X] Second\n",
+      "* [ ] First\n\n* [x] Second\n",
+      "1) [ ] First\n2) [x] Second\n",
+      "+ [ ] First\n  * [X] Nested\n+ [x] Second\n",
+      "- [ ] First\r\n- [X] Second\r\n",
+    ]) {
+      const parsed = parseFileMarkdown(source, schema);
+      const json = structuredClone(parsed.document.toJSON());
+      json.content![0]!.content![0]!.attrs!.checked = true;
+      expect(serializeFileMarkdown(schema.nodeFromJSON(json), parsed)).toBe(
+        source.replace("[ ]", "[x]"),
+      );
+      json.content![0]!.content![0]!.attrs!.checked = false;
+      json.content![0]!.content![0]!.content![0]!.content![0]!.text = "Updated";
+      const edited = serializeFileMarkdown(schema.nodeFromJSON(json), parsed);
+      expect(edited).toMatch(
+        source.startsWith("1)")
+          ? /^1\) \[ \] Updated/
+          : new RegExp(`^\\${source[0]} \\[ \\] Updated`),
+      );
+      if (source.includes("\n\n")) expect(edited).toContain("\n\n");
+      if (source.includes("Nested")) expect(edited).toMatch(/\n +\* \[x\] Nested/);
+    }
   });
 
   it("keeps new paragraphs separate when a split inherits the original source identity", () => {
