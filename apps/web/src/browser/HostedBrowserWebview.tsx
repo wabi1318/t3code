@@ -19,6 +19,7 @@ import {
   resolveFittedBrowserViewport,
 } from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
+import { BrowserFindBar, type SearchableBrowserWebview } from "./BrowserFindBar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
 import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./desktopTabLifetime";
 import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
@@ -31,7 +32,7 @@ import {
   type WebviewCrashRecoveryState,
 } from "./webviewCrashRecovery";
 
-interface ElectronWebview extends HTMLElement {
+interface ElectronWebview extends SearchableBrowserWebview {
   src: string;
   partition: string;
   preload?: string;
@@ -311,7 +312,12 @@ export function HostedBrowserWebview(props: {
       onScroll={syncContentPresentation}
       data-preview-rendering={renderingActive ? "active" : "suspended"}
       data-preview-viewport={runtimeTabId}
+      data-preview-panel-mode="embedded"
+      data-browser-find-tab={runtimeTabId}
     >
+      {active ? (
+        <BrowserFindBar key={webviewGeneration} tabId={runtimeTabId} webviewRef={webviewRef} />
+      ) : null}
       <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>
         {deviceToolbarVisible && effectiveViewport._tag !== "fill" ? (
           <BrowserDeviceToolbar
