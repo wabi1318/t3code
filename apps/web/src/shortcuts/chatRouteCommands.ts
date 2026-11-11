@@ -3,6 +3,7 @@ import type { AnyRouter } from "@tanstack/react-router";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
+import { openBrowserFind } from "../browser/browserFind";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { dispatchPreviewAction, type PreviewAction } from "../components/preview/previewActionBus";
@@ -159,6 +160,13 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       },
       "preview.refresh": previewCommand("refresh"),
       "preview.focusUrl": previewCommand("focus-url"),
+      "preview.find": (event) => {
+        const target = document.activeElement?.closest<HTMLElement>("[data-browser-find-tab]");
+        const tabId = target?.dataset.browserFindTab;
+        if (!tabId) return false;
+        claim(event);
+        openBrowserFind(tabId);
+      },
       "preview.zoomIn": previewCommand("zoom-in"),
       "preview.zoomOut": previewCommand("zoom-out"),
       "preview.resetZoom": previewCommand("reset-zoom"),

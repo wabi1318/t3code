@@ -690,6 +690,18 @@ describe("PreviewManager", () => {
         expect(focus).toHaveBeenCalledOnce();
         expect(send).toHaveBeenCalledTimes(2);
         send.mockClear();
+        focus.mockClear();
+        yield* manager.setForwardedShortcuts([
+          { command: "preview.find", shortcut: parseKeybindingShortcut("mod+f")! },
+        ]);
+        beforeInput({ preventDefault } as never, { ...key, key: "f", shift: false } as never);
+        expect(focus).toHaveBeenCalledOnce();
+        expect(send).toHaveBeenCalledExactlyOnceWith(
+          "desktop:menu-action",
+          "preview.find",
+          "tab_older",
+        );
+        send.mockClear();
         yield* manager.setForwardedShortcuts([{ command: "view.reopenClosed", shortcut }]);
 
         Object.assign(newer.webContents, { focusedFrame: null });
