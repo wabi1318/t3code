@@ -64,6 +64,13 @@ match in a folded file opens it. Escape closes the search. This shortcut is not
 configurable. A very large uncommitted diff loads its files as you scroll, and
 find only searches the files loaded so far.
 
+## Find in a browser page
+
+In the desktop app, focus a browser page and press `mod+f`, or choose **Find in
+page** from its browser menu. Enter and `Shift+Enter` move between matches;
+Escape closes the search. Change the shortcut under **Preview: Find in Page**
+in Keybindings. This search is available for browser pages hosted by the desktop app.
+
 ## iPad
 
 With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
