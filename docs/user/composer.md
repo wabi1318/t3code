@@ -34,7 +34,9 @@ it. Very large code blocks are shown without syntax highlighting.
 
 After a Codex response finishes on web or desktop, T3 Code can suggest one next
 message in an empty composer. Press **Tab** to turn it into an editable draft,
-then review and send it. Typing your own message dismisses the suggestion.
+then review and send it. Typing hides the suggestion; clearing the composer
+shows the same suggestion again without another model request. Switching threads
+or receiving a new response discards the previous suggestion.
 Suggestions use your existing Codex connection and incur additional model usage.
 
 ## Attach files
