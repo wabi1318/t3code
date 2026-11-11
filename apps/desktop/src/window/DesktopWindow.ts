@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import * as Electron from "electron";
@@ -37,8 +38,18 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { makeQuitShortcutHandler } from "./QuitHold.ts";
 import { copyContextMenuImage } from "./ContextMenuImage.ts";
+import { createContextMenuSelectionLink } from "./ContextMenuSelectionLink.ts";
 
 const TITLEBAR_HEIGHT = 40;
+
+class ContextMenuSelectionLinkCopyError extends Schema.TaggedError<ContextMenuSelectionLinkCopyError>()(
+  "ContextMenuSelectionLinkCopyError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not copy a link to the selected text.";
+  }
+}
 // Match --workspace-topbar-height in apps/web/src/index.css; native macOS buttons stay 14 points at any zoom.
 const MACOS_WORKSPACE_TOPBAR_HEIGHT = 52;
 const MACOS_WINDOW_BUTTON_RADIUS = 7;
@@ -525,6 +536,10 @@ export const make = Effect.gen(function* () {
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = false;
       webPreferences.disableHtmlFullscreenWindowResize = true;
+      // Chromium generates unambiguous links, including selections across paragraphs.
+      webPreferences.enableBlinkFeatures = [webPreferences.enableBlinkFeatures, "TextFragmentAPI"]
+        .filter(Boolean)
+        .join(",");
       if (previewPasskeys.bridgeEnabled) {
         webPreferences.additionalArguments = [
           ...(webPreferences.additionalArguments ?? []),
@@ -537,6 +552,7 @@ export const make = Effect.gen(function* () {
     const installContextMenu = (
       ownerWindow: Electron.BrowserWindow,
       contents: Electron.WebContents,
+      isBrowser = false,
     ): void => {
       if (contextMenuContents.has(contents)) return;
       contextMenuContents.add(contents);
@@ -547,6 +563,35 @@ export const make = Effect.gen(function* () {
         contents.focus();
 
         const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
+
+        const frame = params.frame;
+        if (
+          isBrowser &&
+          frame &&
+          !params.isEditable &&
+          params.selectionText.trim().length > 0 &&
+          Option.isSome(ElectronShell.parseSafeExternalUrl(frame.url))
+        ) {
+          menuTemplate.push(
+            {
+              label: "Copy Link to Highlight",
+              click: () => {
+                void runPromise(
+                  Effect.tryPromise({
+                    try: () => createContextMenuSelectionLink(frame),
+                    catch: (cause) => new ContextMenuSelectionLinkCopyError({ cause }),
+                  }).pipe(
+                    Effect.flatMap((link) =>
+                      link === null ? Effect.void : electronShell.copyText(link),
+                    ),
+                    Effect.catch(() => logWindowWarning("failed to copy selection link")),
+                  ),
+                );
+              },
+            },
+            { type: "separator" },
+          );
+        }
 
         if (params.misspelledWord) {
           for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
@@ -605,12 +650,12 @@ export const make = Effect.gen(function* () {
         );
       });
       contents.on("did-create-window", (popup) => {
-        installContextMenu(popup, popup.webContents);
+        installContextMenu(popup, popup.webContents, isBrowser);
       });
     };
     installContextMenu(window, window.webContents);
     window.webContents.on("did-attach-webview", (_event, contents) => {
-      installContextMenu(window, contents);
+      installContextMenu(window, contents, true);
       void runPromise(previewManager.prepareWebview(contents));
     });
 
