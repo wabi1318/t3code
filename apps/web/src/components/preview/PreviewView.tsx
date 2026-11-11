@@ -77,6 +77,7 @@ import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
 import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
+import { openBrowserFind } from "~/browser/browserFind";
 import { alternatePreviewRuntime, useRendersServerTabNatively } from "~/browser/previewRuntime";
 import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/ServerBrowserSurface";
 import { cn } from "~/lib/utils";
@@ -445,6 +446,7 @@ export function PreviewView({
         ...(nativeServerTab && previewBridge
           ? {
               openDevTools: desktopCall(previewBridge.openDevTools),
+              findInPage: () => runtimeTabId && openBrowserFind(runtimeTabId),
               toggleNativePictureInPicture: () => handleNativePictureInPicture(),
             }
           : {}),
@@ -452,6 +454,7 @@ export function PreviewView({
     : previewBridge
       ? {
           hardReload: desktopCall(previewBridge.hardReload),
+          findInPage: () => runtimeTabId && openBrowserFind(runtimeTabId),
           setColorScheme: (colorScheme) => {
             if (runtimeTabId)
               void previewBridge?.setColorScheme(runtimeTabId, colorScheme).catch(() => undefined);
@@ -874,6 +877,7 @@ export function PreviewView({
     <div
       className="flex min-h-0 flex-1 flex-col bg-background"
       data-thread-key={scopedThreadKey(threadRef)}
+      data-browser-find-tab={!isServerTab ? (runtimeTabId ?? undefined) : undefined}
     >
       <PreviewChromeRow
         url={url}

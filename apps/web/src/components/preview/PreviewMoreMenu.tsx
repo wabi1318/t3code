@@ -29,6 +29,7 @@ const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
 
 export interface PreviewMoreMenuActions {
   readonly hardReload: () => void;
+  readonly findInPage?: () => void;
   readonly setColorScheme: (colorScheme: DesktopPreviewColorScheme) => void;
   readonly zoomIn: () => void;
   readonly zoomOut: () => void;
@@ -83,6 +84,11 @@ export function PreviewMoreMenu({
     <Menu>
       <MenuTriggerButton />
       <MenuPopup align="end" sideOffset={6}>
+        {actions.findInPage ? (
+          <MenuItem onClick={actions.findInPage} disabled={disabled}>
+            Find in page
+          </MenuItem>
+        ) : null}
         <MenuItem onClick={actions.hardReload} disabled={disabled}>
           Hard reload
         </MenuItem>

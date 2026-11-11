@@ -265,11 +265,14 @@ describe("root reopen shortcut", () => {
       expect(useClosedViewStore.getState().entries).toEqual([]);
     },
   );
-  it("forwards address-bar focus from a focused desktop page", async () => {
+  it("forwards address-bar focus and page find from a focused desktop page", async () => {
     setup();
     await using _shortcut = await renderShortcut();
     expect(state.setShortcuts).toHaveBeenLastCalledWith(
-      expect.arrayContaining([expect.objectContaining({ command: "preview.focusUrl" })]),
+      expect.arrayContaining([
+        expect.objectContaining({ command: "preview.focusUrl" }),
+        expect.objectContaining({ command: "preview.find" }),
+      ]),
     );
   });
 });
