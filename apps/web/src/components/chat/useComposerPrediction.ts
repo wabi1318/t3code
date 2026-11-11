@@ -29,16 +29,19 @@ export function useComposerPrediction(input: {
       return;
     }
     if (completedRunId === null || observed.current.runId === completedRunId) return;
-    observed.current.runId = completedRunId;
     if (!enabled || threadId === null) return;
+    observed.current.runId = completedRunId;
     let current = true;
+    let settled = false;
     void request({ environmentId, input: { threadId, runId: completedRunId } }).then((response) => {
+      settled = true;
       if (current && response._tag === "Success" && response.value.prediction) {
         setResult({ key, runId: completedRunId, text: response.value.prediction });
       }
     });
     return () => {
       current = false;
+      if (!settled) observed.current.runId = null;
     };
   }, [key, environmentId, threadId, completedRunId, enabled]);
 
