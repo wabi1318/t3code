@@ -6,6 +6,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import type { BlockContent, Literal, PhrasingContent, RootContent } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
+import { mathToMarkdown } from "mdast-util-math";
 import { defaultHandlers, toMarkdown } from "mdast-util-to-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -169,7 +170,7 @@ export function stripFileMarkdownSourceIds(slice: Slice): Slice {
 function originalSource(node: RootContent | PhrasingContent, source: string): string {
   if (node.type === "html") return node.value;
   if (node.type === "link" || node.type === "linkReference")
-    return toMarkdown(node).replace(/\n$/, "");
+    return toMarkdown(node, { extensions: [gfmToMarkdown(), mathToMarkdown()] }).replace(/\n$/, "");
   if (node.type === "code") return toMarkdown(node, { fences: true }).replace(/\n$/, "");
   if (node.type === "math") {
     if (node.position && node.position.start.line === node.position.end.line)
@@ -320,7 +321,14 @@ function inlineMarkdown(parent: DocumentNode, inTable = false): PhrasingContent[
     }
     let content: PhrasingContent =
       node.type.name === "fileMarkdownRawInline"
-        ? { type: "fileMarkdownRaw", value: node.attrs.source }
+        ? {
+            type: "fileMarkdownRaw",
+            value: inTable
+              ? node.attrs.source.replace(/(\\*)\|/g, (match: string, escapes: string) =>
+                  escapes.length % 2 === 0 ? `\\${match}` : match,
+                )
+              : node.attrs.source,
+          }
         : { type: "text", value: node.text ?? "" };
     for (const mark of node.marks.toReversed()) {
       switch (mark.type.name) {

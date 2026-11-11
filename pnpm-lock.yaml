@@ -1227,6 +1227,9 @@ importers:
       mdast-util-gfm:
         specifier: 3.1.0
         version: 3.1.0(supports-color@8.1.1)
+      mdast-util-math:
+        specifier: 3.0.0
+        version: 3.0.0(patch_hash=afe6b2c89e1eaddfd3c90cf2723f12c9a17d513e65beff51653781486013251c)(supports-color@8.1.1)
       mdast-util-to-markdown:
         specifier: 2.1.2
         version: 2.1.2

@@ -35,6 +35,7 @@ describe("rendered Markdown documents", () => {
       "[ref]: https://example.com",
       "",
       "See [reference][ref] and $x^2$.",
+      "[~~Removed~~ and $x$](./math.md)",
       "",
       "```mermaid",
       "graph LR",
@@ -73,7 +74,7 @@ describe("rendered Markdown documents", () => {
   });
 
   it("writes table cell and task changes as valid Markdown", () => {
-    const source = "| Name | Value |\n| :--- | ---: |\n| a | 1 |\n\n- [ ] Task\n";
+    const source = "| Name | Value |\n| :--- | ---: |\n| [a\\|b](./x.md) | 1 |\n\n- [ ] Task\n";
     const parsed = parseFileMarkdown(source, schema);
     const json = structuredClone(parsed.document.toJSON());
     json.content![0]!.content![1]!.content![1]!.content![0]!.content![0]!.text = "2 | 3";
@@ -84,6 +85,7 @@ describe("rendered Markdown documents", () => {
     json.content![1]!.content![0]!.attrs!.checked = true;
     const saved = serializeFileMarkdown(schema.nodeFromJSON(json), parsed);
     expect(saved).toContain("2 \\| 3");
+    expect(saved).toContain("[a\\|b](./x.md)");
     expect(saved).toContain("<br><br>Next line");
     expect(saved).toContain("- [x] Task");
     const reread = parseFileMarkdown(saved, schema);
