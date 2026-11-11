@@ -1,10 +1,12 @@
 import { getSchema } from "@tiptap/core";
+import { Slice } from "@tiptap/pm/model";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   fileMarkdownExtensions,
   parseFileMarkdown,
   serializeFileMarkdown,
+  stripFileMarkdownSourceIds,
 } from "./fileMarkdownDocument";
 
 const schema = getSchema(fileMarkdownExtensions);
@@ -50,7 +52,7 @@ describe("rendered Markdown documents", () => {
 
   it("changes rendered text while keeping surrounding source and inline formatting", () => {
     const source =
-      "---\ntitle: Draft\n---\n\nTitle\n=====\n\nHello **world** and [link](https://example.com).\n\n<!-- exact -->\n\n~~~mermaid\ngraph LR\nA --> B\n~~~\n";
+      "---\ntitle: Draft\n---\n\nTitle\n=====\n\nHello **world** and **[link](https://example.com)**.\n\n<!-- exact -->\n\n~~~mermaid\ngraph LR\nA --> B\n~~~\n";
     const parsed = parseFileMarkdown(source, schema);
     const paragraph = parsed.document.child(1);
     const changed = paragraph.copy(
@@ -130,6 +132,15 @@ describe("rendered Markdown documents", () => {
       inserted.type.create({ ...inserted.attrs, sourceId: null }, inserted.content),
     ]);
     expect(serializeFileMarkdown(copied, formula)).toBe("$$x^2$$\n");
+
+    const emphasized = parseFileMarkdown("_Original_\n", schema);
+    const pasted = stripFileMarkdownSourceIds(new Slice(emphasized.document.content, 0, 0));
+    expect(pasted.content.firstChild!.attrs.sourceId).toBeNull();
+    const duplicated = schema.nodes.doc!.create(null, [
+      pasted.content.firstChild!,
+      emphasized.document.firstChild!,
+    ]);
+    expect(serializeFileMarkdown(duplicated, emphasized)).toBe("*Original*\n\n_Original_\n");
   });
 
   it("keeps multiline HTML inside an edited quote without duplicating quote markers or carriage returns", () => {
@@ -139,5 +150,13 @@ describe("rendered Markdown documents", () => {
     json.content![0]!.content![0]!.content![0]!.text = "Updated";
     const saved = serializeFileMarkdown(schema.nodeFromJSON(json), parsed);
     expect(saved).toBe(source.replace("First", "Updated"));
+
+    const linkedSource = "> First\n>\n> [a\n> link](./readme.md)\n";
+    const linked = parseFileMarkdown(linkedSource, schema);
+    const edited = structuredClone(linked.document.toJSON());
+    edited.content![0]!.content![0]!.content![0]!.text = "Updated";
+    expect(serializeFileMarkdown(schema.nodeFromJSON(edited), linked)).toBe(
+      linkedSource.replace("First", "Updated"),
+    );
   });
 });

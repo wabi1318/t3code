@@ -1,5 +1,5 @@
 import { Extension, Node, type JSONContent, type Extensions } from "@tiptap/core";
-import type { Node as DocumentNode, Schema } from "@tiptap/pm/model";
+import { Fragment, Slice, type Node as DocumentNode, type Schema } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import { BulletList, OrderedList } from "@tiptap/extension-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -144,8 +144,32 @@ export interface FileMarkdownDocument {
   readonly references: string;
 }
 
+export function stripFileMarkdownSourceIds(slice: Slice): Slice {
+  const clearSourceId = (node: DocumentNode): DocumentNode =>
+    node.isText
+      ? node
+      : node.type.create(
+          { ...node.attrs, sourceId: null },
+          Fragment.fromArray(
+            Array.from({ length: node.childCount }, (_, index) => clearSourceId(node.child(index))),
+          ),
+          node.marks,
+        );
+  return new Slice(
+    Fragment.fromArray(
+      Array.from({ length: slice.content.childCount }, (_, index) =>
+        clearSourceId(slice.content.child(index)),
+      ),
+    ),
+    slice.openStart,
+    slice.openEnd,
+  );
+}
+
 function originalSource(node: RootContent | PhrasingContent, source: string): string {
   if (node.type === "html") return node.value;
+  if (node.type === "link" || node.type === "linkReference")
+    return toMarkdown(node).replace(/\n$/, "");
   if (node.type === "code") return toMarkdown(node, { fences: true }).replace(/\n$/, "");
   if (node.type === "math") {
     if (node.position && node.position.start.line === node.position.end.line)
@@ -294,11 +318,10 @@ function inlineMarkdown(parent: DocumentNode, inTable = false): PhrasingContent[
       children.push(inTable ? { type: "fileMarkdownRaw", value: "<br>" } : { type: "break" });
       return;
     }
-    if (node.type.name === "fileMarkdownRawInline") {
-      children.push({ type: "fileMarkdownRaw", value: node.attrs.source });
-      return;
-    }
-    let content: PhrasingContent = { type: "text", value: node.text ?? "" };
+    let content: PhrasingContent =
+      node.type.name === "fileMarkdownRawInline"
+        ? { type: "fileMarkdownRaw", value: node.attrs.source }
+        : { type: "text", value: node.text ?? "" };
     for (const mark of node.marks.toReversed()) {
       switch (mark.type.name) {
         case "code":

@@ -13,6 +13,7 @@ import {
   fileMarkdownExtensions,
   parseFileMarkdown,
   serializeFileMarkdown,
+  stripFileMarkdownSourceIds,
 } from "./fileMarkdownDocument";
 
 type PreviewProps = Parameters<typeof FileMarkdownPreview>[0];
@@ -65,6 +66,7 @@ export default function FileMarkdownEditor({
       created.setOptions({ content: source.current.document.toJSON() });
     },
     editorProps: {
+      transformPasted: stripFileMarkdownSourceIds,
       attributes: {
         class: "chat-markdown file-markdown-editor min-h-48 outline-none",
         role: "textbox",
