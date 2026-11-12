@@ -297,7 +297,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
     runs-on: ${{ vars.CI_USE_GITHUB_HOSTED_RUNNERS == 'true' && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ vars.CI_USE_GITHUB_HOSTED_RUNNERS == 'true' && 20 || 10 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6

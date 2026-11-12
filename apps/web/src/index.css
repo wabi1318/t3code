@@ -1875,6 +1875,44 @@ code {
   margin-bottom: 0;
 }
 
+.file-markdown-editor table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block: 0.65rem;
+}
+
+.file-markdown-editor :is(th, td) {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+}
+
+.file-markdown-editor th {
+  font-weight: 600;
+  background: var(--muted);
+}
+
+.file-markdown-editor li[data-type="taskItem"] {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.file-markdown-editor li[data-type="taskItem"] > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-markdown-editor li[data-type="taskItem"] > div > p {
+  margin: 0;
+}
+
+.file-markdown-raw-inline,
+.file-markdown-raw-inline .chat-markdown,
+.file-markdown-raw-inline .chat-markdown > p {
+  display: inline;
+}
+
 .chat-markdown p,
 .chat-markdown ul,
 .chat-markdown ol,
