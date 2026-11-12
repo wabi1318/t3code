@@ -30,7 +30,7 @@ export function WorkLogBlock({
             : "pb-2"
       }
     >
-      {children}
+      <div className="border-s-2 border-border/70 bg-foreground/5 ps-2 pe-1">{children}</div>
     </div>
   );
 }
@@ -54,7 +54,7 @@ function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
   return (
     <div
       className={cn(
-        "flex min-h-6 min-w-0 gap-1.5 text-sm leading-relaxed select-none [&_*]:select-none",
+        "flex min-h-6 min-w-0 gap-1.5 text-xs leading-relaxed select-none [&_*]:select-none [&_.text-sm]:text-xs",
         wrapLabel ? "items-start" : "items-center",
       )}
     >
