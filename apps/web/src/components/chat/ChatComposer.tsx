@@ -1,4 +1,5 @@
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
+import { useComposerPrediction } from "./useComposerPrediction";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { BackgroundThreadContext } from "./backgroundThread";
@@ -901,6 +902,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
+  const { prediction: composerPrediction } = useComposerPrediction({
+    environmentId,
+    threadId: activeThreadId,
+    completedRunId:
+      phase !== "running" && !isSendBusy && activeThread?.latestRun?.status === "completed"
+        ? activeThread.latestRun.runId
+        : null,
+    enabled:
+      canOperateThread &&
+      selectedProvider === "codex" &&
+      prompt.length === 0 &&
+      phase !== "running" &&
+      !isSendBusy &&
+      !isCompacting &&
+      !isRevertingCheckpoint &&
+      environmentUnavailable === null &&
+      pendingUserInputs.length === 0 &&
+      pendingApprovals.length === 0 &&
+      !showPlanFollowUpPrompt &&
+      editingQueuedAttachments === null &&
+      composerImages.length === 0 &&
+      composerFiles.length === 0 &&
+      composerTerminalContexts.length === 0,
+  });
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
   const providerSetupInstanceId = noProviderAvailable
@@ -3397,6 +3422,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     literalText={isLiteralPendingAnswer}
                     isPathQueryActive={isPathQueryActiveStable}
                     value={activePendingProgress ? activePendingProgress.customAnswer : prompt}
+                    prediction={composerPrediction}
                     cursor={composerCursor}
                     contextRecords={composerContextRecords}
                     buildContextClipboardFragment={buildContextClipboardFragmentStable}

@@ -49,6 +49,9 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareTriage)).toBe(
       AuthOrchestrationOperateScope,
     );
+    expect(requiredScopeForRpcMethod(WS_METHODS.composerPredict)).toBe(
+      AuthOrchestrationOperateScope,
+    );
   });
 
   it("separates passive terminal observation from operations that can change a shell", () => {

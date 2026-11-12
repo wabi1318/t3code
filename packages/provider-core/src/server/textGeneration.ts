@@ -72,6 +72,16 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface ComposerPredictionGenerationInput {
+  readonly cwd: string;
+  readonly context: string;
+  readonly modelSelection: ModelSelection;
+}
+
+export interface ComposerPredictionGenerationResult {
+  readonly prediction: string | null;
+}
+
 export interface ReviewGuideStackLayer {
   readonly number: number;
   readonly title: string | null;
@@ -98,6 +108,10 @@ export type ReviewGuideGenerationResult = Omit<
 >;
 
 export interface ProviderTextGeneration {
+  readonly generateComposerPrediction?: (
+    input: ComposerPredictionGenerationInput,
+  ) => Effect.Effect<ComposerPredictionGenerationResult, TextGenerationError>;
+
   readonly generateCommitMessage: (
     input: CommitMessageGenerationInput,
   ) => Effect.Effect<CommitMessageGenerationResult, TextGenerationError>;
