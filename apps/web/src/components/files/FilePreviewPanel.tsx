@@ -121,6 +121,7 @@ import { changeFileSaveSession, useFileSaveSession } from "./fileSaveSessions";
 import { revisionedQuery } from "~/state/revisionedQuery";
 import {
   getProjectFileContents,
+  getProjectFileEditOrigin,
   getProjectFileQueryAtom,
   setProjectFileQueryData,
   useProjectFileQuery,
@@ -919,6 +920,7 @@ function RenderedMarkdownSurface({
   cwd,
   relativePath,
   contents,
+  updateOrigin,
   threadRef,
   workspaceMutationId,
   readOnly,
@@ -934,14 +936,16 @@ function RenderedMarkdownSurface({
 > & {
   threadRef: ScopedThreadRef;
   readOnly: boolean;
+  updateOrigin: object | undefined;
   workspaceMutationId: string | null;
 }) {
   const saveTarget = { environmentId, cwd, relativePath };
+  const [editorOrigin] = useState(() => ({}));
   useFileSaveSession(saveTarget, onPendingChange);
 
   const saveContents = (nextContents: string) => {
     if (nextContents === getProjectFileContents(environmentId, cwd, relativePath)) return;
-    setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
+    setProjectFileQueryData(environmentId, cwd, relativePath, nextContents, editorOrigin);
     changeFileSaveSession(saveTarget, nextContents);
   };
 
@@ -959,6 +963,8 @@ function RenderedMarkdownSurface({
         <Suspense fallback={<FileSurfaceLoading />}>
           <FileMarkdownEditor
             text={contents}
+            editorOrigin={editorOrigin}
+            updateOrigin={updateOrigin}
             cwd={cwd}
             relativePath={relativePath}
             threadRef={threadRef}
@@ -1487,12 +1493,13 @@ export default function FilePreviewPanel({
               </Suspense>
             ) : isMarkdown && renderMarkdown ? (
               <RenderedMarkdownSurface
-                key={relativePath}
+                key={JSON.stringify([environmentId, cwd, relativePath])}
                 environmentId={environmentId}
                 cwd={cwd}
                 relativePath={relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
+                updateOrigin={getProjectFileEditOrigin(file.data)}
                 workspaceMutationId={workspaceMutationId}
                 readOnly={file.data.truncated || isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}

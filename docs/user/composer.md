@@ -361,6 +361,11 @@ If nothing on the device can show a format, save or share it to open it elsewher
 50 MB opens as a folder list on every surface; on mobile, select a file inside it to preview,
 save, or add it to chat.
 
+On web and desktop, click a paragraph in an editable workspace Markdown file to show its
+Markdown markers and edit it. Changes save automatically, preserving the source outside
+your edits. Files with footnotes show a full preview; click the text to edit the source,
+then move focus outside the editor to see the preview again.
+
 ## Images and videos in messages
 
 Select an image or video attachment or link to preview it. Playback support depends

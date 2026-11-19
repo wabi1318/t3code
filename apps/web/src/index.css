@@ -1875,42 +1875,66 @@ code {
   margin-bottom: 0;
 }
 
-.file-markdown-editor table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-block: 0.65rem;
+.file-markdown-editor .cm-editor {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+}
+.file-markdown-editor .cm-editor.cm-focused {
+  outline: none;
+}
+.file-markdown-editor .cm-scroller {
+  font-family: inherit;
+  line-height: 1.7;
+  overflow: visible;
 }
 
-.file-markdown-editor :is(th, td) {
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.75rem;
-  vertical-align: top;
+.file-markdown-editor .cm-editor[data-markdown-source="true"] .cm-scroller {
+  font-family: var(--font-mono);
 }
-
-.file-markdown-editor th {
+.file-markdown-editor .cm-content {
+  min-height: 12rem;
+  padding: 0;
+  caret-color: var(--foreground);
+}
+.file-markdown-editor .cm-line {
+  padding: 0;
+}
+.file-markdown-editor .cm-cursor {
+  border-left-color: var(--foreground);
+}
+.file-markdown-editor .cm-selectionBackground {
+  background: var(--accent) !important;
+}
+.file-markdown-editor .file-markdown-heading {
   font-weight: 600;
+  line-height: 1.4;
+  padding-block: 0.3rem;
+}
+.file-markdown-editor .file-markdown-heading-1 {
+  font-size: 1.6rem;
+}
+.file-markdown-editor .file-markdown-heading-2 {
+  font-size: 1.3rem;
+}
+.file-markdown-editor .file-markdown-heading-3 {
+  font-size: 1.1rem;
+}
+.file-markdown-editor .file-markdown-quote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+.file-markdown-editor .cm-line code {
+  font-family: var(--font-mono);
   background: var(--muted);
+  border-radius: 0.2rem;
+  padding-inline: 0.15rem;
 }
-
-.file-markdown-editor li[data-type="taskItem"] {
-  display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
+.file-markdown-bullet {
+  white-space: pre;
 }
-
-.file-markdown-editor li[data-type="taskItem"] > div {
-  flex: 1;
-  min-width: 0;
-}
-
-.file-markdown-editor li[data-type="taskItem"] > div > p {
-  margin: 0;
-}
-
-.file-markdown-raw-inline,
-.file-markdown-raw-inline .chat-markdown,
-.file-markdown-raw-inline .chat-markdown > p {
-  display: inline;
+.file-markdown-block {
+  cursor: text;
 }
 
 .chat-markdown p,

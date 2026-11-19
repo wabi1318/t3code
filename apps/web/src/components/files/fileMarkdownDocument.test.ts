@@ -1,164 +1,232 @@
-import { getSchema } from "@tiptap/core";
-import { Slice } from "@tiptap/pm/model";
-import { describe, expect, it } from "vite-plus/test";
-
+import { expect, it, vi } from "vite-plus/test";
+import { ensureSyntaxTree } from "@codemirror/language";
+import * as frontmatter from "@t3tools/shared/markdownFrontmatter";
+import { EditorState, Transaction } from "@codemirror/state";
+import { history, undo, redo } from "@codemirror/commands";
+import { fileMarkdownSource, readMarkdownSource } from "./fileMarkdownSource";
 import {
-  fileMarkdownExtensions,
+  fileMarkdownLanguage,
+  fileMarkdownFrontmatter,
   parseFileMarkdown,
-  serializeFileMarkdown,
-  stripFileMarkdownSourceIds,
+  presentFileMarkdown,
+  refreshFileMarkdownReferences,
 } from "./fileMarkdownDocument";
 
-const schema = getSchema(fileMarkdownExtensions);
-
-describe("rendered Markdown documents", () => {
-  it("preserves untouched Markdown including frontmatter, CRLF, references, comments and diagrams", () => {
-    const source = [
-      "---",
-      "title: Draft",
-      "---",
-      "",
-      "Title",
-      "=====",
-      "",
-      "Text with **bold**, _italics_, ~~strike~~, `code`, &amp; and [a link](https://example.com).",
-      "",
-      "+ [ ] First",
-      "+ [x] Second",
-      "",
-      "<!-- keep this -->",
-      "",
-      "| Name | Value |",
-      "| :--- | ---: |",
-      "| a | 1 |",
-      "",
-      "[ref]: https://example.com",
-      "",
-      "See [reference][ref] and $x^2$.",
-      "[~~Removed~~ and $x$](./math.md)",
-      "",
-      "```mermaid",
-      "graph LR",
-      "A --> B",
-      "```",
-      "",
-      "![Image](./image.png)",
-      "",
-    ].join("\r\n");
-    const parsed = parseFileMarkdown(source, schema);
-    expect(serializeFileMarkdown(parsed.document, parsed)).toBe(source);
-    expect(parsed.document.textContent).toContain("Text with bold");
-    expect(parsed.document.child(0).type.name).toBe("heading");
-  });
-
-  it("changes rendered text while keeping surrounding source and inline formatting", () => {
-    const source =
-      "---\ntitle: Draft\n---\n\nTitle\n=====\n\nHello **world** and **[link](https://example.com)**.\n\n<!-- exact -->\n\n~~~mermaid\ngraph LR\nA --> B\n~~~\n";
-    const parsed = parseFileMarkdown(source, schema);
-    const paragraph = parsed.document.child(1);
-    const changed = paragraph.copy(
-      schema.nodes.paragraph!.create(null, [
-        schema.text("Goodbye "),
-        ...Array.from({ length: paragraph.childCount - 1 }, (_, index) =>
-          paragraph.child(index + 1),
-        ),
-      ]).content,
-    );
-    const document = schema.nodes.doc!.create(null, [
-      parsed.document.child(0),
-      changed,
-      parsed.document.child(2),
-      parsed.document.child(3),
-    ]);
-    expect(serializeFileMarkdown(document, parsed)).toBe(source.replace("Hello ", "Goodbye "));
-  });
-
-  it("writes table cell and task changes as valid Markdown", () => {
-    const source = "| Name | Value |\n| :--- | ---: |\n| [a\\|b](./x.md) | 1 |\n\n- [ ] Task\n";
-    const parsed = parseFileMarkdown(source, schema);
-    const json = structuredClone(parsed.document.toJSON());
-    json.content![0]!.content![1]!.content![1]!.content![0]!.content![0]!.text = "2 | 3";
-    json.content![0]!.content![1]!.content![1]!.content!.push({
-      type: "paragraph",
-      content: [{ type: "text", text: "Next line" }],
+it("reveals only the selected paragraph and keeps original syntax as source", () => {
+  const source =
+    "# Title\n\nFirst **bold**\n\n- [ ] Second _italic_\n- ![badge](x.png)\n\n| A | B |\n|---|---|\n| 1 | 2 |\n";
+  const document = parseFileMarkdown(source);
+  const state = EditorState.create({ doc: source, extensions: fileMarkdownLanguage() });
+  const inactive = presentFileMarkdown(state, document.definitions, []);
+  expect(inactive.filter((item) => item.kind === "preview")).toHaveLength(2);
+  const caret = source.indexOf("bold");
+  const active = presentFileMarkdown(state, document.definitions, [{ from: caret, to: caret }]);
+  expect(
+    active
+      .filter((item) => item.kind === "hide")
+      .some((item) => item.from >= source.indexOf("First") && item.to <= source.indexOf("\n\n-")),
+  ).toBe(false);
+  expect(
+    active.filter((item) => item.kind === "hide").map((item) => source.slice(item.from, item.to)),
+  ).toContain("_");
+  expect(state.doc.toString()).toBe(source);
+  for (const markup of ["<!-- hidden -->", "<?xml hidden ?>"]) {
+    const inlineSource = `Before ${markup} after`;
+    const inlineState = EditorState.create({
+      doc: inlineSource,
+      extensions: fileMarkdownLanguage(),
     });
-    json.content![1]!.content![0]!.attrs!.checked = true;
-    const saved = serializeFileMarkdown(schema.nodeFromJSON(json), parsed);
-    expect(saved).toContain("2 \\| 3");
-    expect(saved).toContain("[a\\|b](./x.md)");
-    expect(saved).toContain("<br><br>Next line");
-    expect(saved).toContain("- [x] Task");
-    const reread = parseFileMarkdown(saved, schema);
-    expect(reread.document.child(0).child(1).child(1).textContent).toBe("2 | 3Next line");
-    expect(reread.document.child(1).child(0).attrs.checked).toBe(true);
-
-    for (const source of [
-      "+ [ ] First\n+ [X] Second\n",
-      "* [ ] First\n\n* [x] Second\n",
-      "1) [ ] First\n2) [x] Second\n",
-      "+ [ ] First\n  * [X] Nested\n+ [x] Second\n",
-      "- [ ] First\r\n- [X] Second\r\n",
-    ]) {
-      const parsed = parseFileMarkdown(source, schema);
-      const json = structuredClone(parsed.document.toJSON());
-      json.content![0]!.content![0]!.attrs!.checked = true;
-      expect(serializeFileMarkdown(schema.nodeFromJSON(json), parsed)).toBe(
-        source.replace("[ ]", "[x]"),
-      );
-      json.content![0]!.content![0]!.attrs!.checked = false;
-      json.content![0]!.content![0]!.content![0]!.content![0]!.text = "Updated";
-      const edited = serializeFileMarkdown(schema.nodeFromJSON(json), parsed);
-      expect(edited).toMatch(
-        source.startsWith("1)")
-          ? /^1\) \[ \] Updated/
-          : new RegExp(`^\\${source[0]} \\[ \\] Updated`),
-      );
-      if (source.includes("\n\n")) expect(edited).toContain("\n\n");
-      if (source.includes("Nested")) expect(edited).toMatch(/\n +\* \[x\] Nested/);
-    }
-  });
-
-  it("keeps new paragraphs separate when a split inherits the original source identity", () => {
-    const parsed = parseFileMarkdown("First\n", schema);
-    const first = parsed.document.firstChild!;
-    const document = schema.nodes.doc!.create(null, [
-      first,
-      first.copy(schema.nodes.paragraph!.create(null, schema.text("Second")).content),
-    ]);
-    expect(serializeFileMarkdown(document, parsed)).toBe("First\n\nSecond\n");
-    expect(serializeFileMarkdown(parsed.document, parsed)).toBe("First\n");
-
-    const formula = parseFileMarkdown("$$x^2$$\n", schema);
-    const inserted = formula.document.firstChild!;
-    const copied = schema.nodes.doc!.create(null, [
-      inserted.type.create({ ...inserted.attrs, sourceId: null }, inserted.content),
-    ]);
-    expect(serializeFileMarkdown(copied, formula)).toBe("$$x^2$$\n");
-
-    const emphasized = parseFileMarkdown("_Original_\n", schema);
-    const pasted = stripFileMarkdownSourceIds(new Slice(emphasized.document.content, 0, 0));
-    expect(pasted.content.firstChild!.attrs.sourceId).toBeNull();
-    const duplicated = schema.nodes.doc!.create(null, [
-      pasted.content.firstChild!,
-      emphasized.document.firstChild!,
-    ]);
-    expect(serializeFileMarkdown(duplicated, emphasized)).toBe("*Original*\n\n_Original_\n");
-  });
-
-  it("keeps multiline HTML inside an edited quote without duplicating quote markers or carriage returns", () => {
-    const source = "> First\r\n>\r\n> <div>\r\n> inside\r\n> </div>\r\n";
-    const parsed = parseFileMarkdown(source, schema);
-    const json = structuredClone(parsed.document.toJSON());
-    json.content![0]!.content![0]!.content![0]!.text = "Updated";
-    const saved = serializeFileMarkdown(schema.nodeFromJSON(json), parsed);
-    expect(saved).toBe(source.replace("First", "Updated"));
-
-    const linkedSource = "> First\n>\n> [a\n> link](./readme.md)\n";
-    const linked = parseFileMarkdown(linkedSource, schema);
-    const edited = structuredClone(linked.document.toJSON());
-    edited.content![0]!.content![0]!.content![0]!.text = "Updated";
-    expect(serializeFileMarkdown(schema.nodeFromJSON(edited), linked)).toBe(
-      linkedSource.replace("First", "Updated"),
+    const inlinePreview = presentFileMarkdown(inlineState, new Map(), []).find(
+      (item) => item.kind === "preview",
     );
+    expect(inlinePreview?.kind === "preview" && inlinePreview.text).toBe(inlineSource);
+    const caret = inlineSource.indexOf(markup);
+    expect(
+      presentFileMarkdown(inlineState, new Map(), [{ from: caret, to: caret }]).some(
+        (item) => item.kind === "preview",
+      ),
+    ).toBe(false);
+    expect(inlineState.doc.toString()).toBe(inlineSource);
+  }
+  for (const opening of ["```", "$$", "<div>"]) {
+    const closing = "---  ";
+    const metadata = `---\nexample: |\n  ${opening}\n${closing}\n\n# Visible body\n`;
+    const withMetadata = EditorState.create({
+      doc: metadata,
+      extensions: fileMarkdownLanguage(),
+    });
+    const presentation = presentFileMarkdown(withMetadata, new Map(), []);
+    expect(withMetadata.field(fileMarkdownFrontmatter)).toBe(
+      metadata.indexOf("\n\n# Visible body") + 1,
+    );
+    expect(
+      presentation.some(
+        (item) =>
+          item.kind === "line" &&
+          item.headingLevel === 1 &&
+          item.from === metadata.indexOf("# Visible body"),
+      ),
+    ).toBe(true);
+    expect(presentation.some((item) => item.from < metadata.indexOf("# Visible body"))).toBe(false);
+  }
+  for (const mathSource of ["- $$\n  x\n\n# After\n", "> $$\n> x\n\n# After\n"]) {
+    const mathState = EditorState.create({ doc: mathSource, extensions: fileMarkdownLanguage() });
+    expect(
+      presentFileMarkdown(mathState, new Map(), []).some(
+        (item) => item.kind === "line" && item.headingLevel === 1,
+      ),
+    ).toBe(true);
+  }
+  const quote = EditorState.create({ doc: "> Quote\n", extensions: fileMarkdownLanguage() });
+  expect(
+    presentFileMarkdown(quote, new Map(), [{ from: 4, to: 4 }], "inline").filter(
+      (item) => item.kind === "hide",
+    ),
+  ).toHaveLength(0);
+  const multilineTask = EditorState.create({
+    doc: "- \n  [ ] Task\n",
+    extensions: fileMarkdownLanguage(),
   });
+  const markers = presentFileMarkdown(multilineTask, new Map(), [], "inline").filter(
+    (item) => item.kind === "hide" || item.kind === "bullet",
+  );
+  expect(markers.some((item) => multilineTask.sliceDoc(item.from, item.to).includes("\n"))).toBe(
+    false,
+  );
+});
+
+it("keeps only referenced definitions in block previews and detects document footnotes", () => {
+  const source = "![badge][used]\n\n[used]: x.png\n[unused]: y.png\n";
+  const state = EditorState.create({ doc: source, extensions: fileMarkdownLanguage() });
+  const preview = presentFileMarkdown(state, parseFileMarkdown(source).definitions, []).find(
+    (item) => item.kind === "preview",
+  );
+  expect(preview?.kind === "preview" && preview.text).toBe("![badge][used]\n\n[used]: x.png");
+  const references = parseFileMarkdown(source);
+  const fenced = state.update({
+    changes: [
+      { from: source.indexOf("[used]:"), insert: "```\n" },
+      { from: source.length, insert: "```\n" },
+    ],
+  });
+  const hidden = refreshFileMarkdownReferences(
+    fenced.state,
+    references.definitionRanges.map((range) => ({
+      ...range,
+      from: fenced.changes.mapPos(range.from),
+      to: fenced.changes.mapPos(range.to),
+    })),
+  );
+  expect(hidden.definitions.size).toBe(0);
+  const restored = fenced.state.update({ changes: fenced.changes.invert(state.doc) }).state;
+  expect(
+    refreshFileMarkdownReferences(restored, hidden.definitionRanges).definitions.get("used"),
+  ).toBe("[used]: x.png");
+  expect(parseFileMarkdown("Text[^note]\n\n[^note]: Footnote").hasFootnotes).toBe(true);
+  expect(parseFileMarkdown("```\n[^note]: Code\n```").hasFootnotes).toBe(false);
+  for (const literal of [
+    "```md\n[^note]: Code\n```\n",
+    "    [^note]: Code\n",
+    "<div>\n[^note]: HTML\n</div>\n",
+    "<!--\n[^note]: Comment\n-->\n",
+    "<?xml\n[^note]: Instruction\n?>\n",
+    "$$\n[^note]: Math\n$$\n",
+  ]) {
+    expect(parseFileMarkdown(literal).hasFootnotes, literal).toBe(false);
+    const literalState = EditorState.create({ doc: literal, extensions: fileMarkdownLanguage() });
+    const from = literal.indexOf("[^note]");
+    const changed = literalState.update({ changes: { from: from + 2, insert: "a" } }).state;
+    const refreshed = refreshFileMarkdownReferences(changed, [], 0, {
+      from,
+      to: changed.doc.lineAt(from).to,
+    });
+    expect(refreshed.hasFootnotes, literal).toBe(false);
+    expect(
+      presentFileMarkdown(changed, new Map(), [], "blocks").filter(
+        (item) => item.kind === "preview",
+      ),
+      literal,
+    ).toHaveLength(1);
+  }
+});
+
+it("preserves mixed line endings through text edits, joined undo and newline deletion", () => {
+  const regressionSource = "Before\r\nKeep LF\nTail\r\n";
+  const regression = EditorState.create({
+    doc: regressionSource,
+    extensions: [fileMarkdownSource(regressionSource)],
+  });
+  const edited = regression.update({ changes: { from: 0, to: 6, insert: "After" } }).state;
+  expect(readMarkdownSource(edited)).toBe(regressionSource.replace("Before", "After"));
+  const source = "# Title\r\n\r\nBefore **bold**\n\nAfter\rLast";
+  let state = EditorState.create({
+    doc: source,
+    extensions: [fileMarkdownSource(source), history()],
+  });
+  const from = state.doc.toString().indexOf("Before");
+  const annotations = [Transaction.userEvent.of("input.type"), Transaction.time.of(0)];
+  state = state.update({ changes: { from, to: from + 6, insert: "After" }, annotations }).state;
+  state = state.update({ changes: { from: from + 5, insert: "!" }, annotations }).state;
+  expect(readMarkdownSource(state)).toBe(source.replace("Before", "After!"));
+  const dispatch = (transaction: Transaction) => {
+    state = transaction.state;
+  };
+  expect(undo({ state, dispatch })).toBe(true);
+  expect(readMarkdownSource(state)).toBe(source);
+  expect(redo({ state, dispatch })).toBe(true);
+  expect(readMarkdownSource(state)).toBe(source.replace("Before", "After!"));
+  const end = state.doc.line(1).to;
+  state = state.update({ changes: { from: end, to: end + 1 } }).state;
+  expect(readMarkdownSource(state)).toBe(source.replace("Before", "After!").replace("\r\n", ""));
+  expect(undo({ state, dispatch })).toBe(true);
+  expect(readMarkdownSource(state)).toBe(source.replace("Before", "After!"));
+  state = state.update({
+    changes: [
+      { from: 0, insert: "Top\n" },
+      { from: state.doc.length, insert: "\nEnd" },
+    ],
+  }).state;
+  expect(readMarkdownSource(state)).toBe(`Top\r\n${source.replace("Before", "After!")}\r\nEnd`);
+  expect(undo({ state, dispatch })).toBe(true);
+  expect(readMarkdownSource(state)).toBe(source.replace("Before", "After!"));
+});
+
+it("does not rescan frontmatter on unrelated body edits and detects new closing delimiters", () => {
+  using mask = vi.spyOn(frontmatter, "maskMarkdownFrontmatter");
+  for (const source of [
+    `---\n\n# Visible\n\n${"Before\n\n".repeat(100)}`,
+    `---\n# Visible\n${"Before\n".repeat(100)}`,
+    "---\ntitle: Draft\n---\n\n# Visible\n\nBefore\n",
+  ]) {
+    let state = EditorState.create({ doc: source, extensions: fileMarkdownLanguage() });
+    ensureSyntaxTree(state, state.doc.length);
+    mask.mockClear();
+    const from = source.indexOf("Before");
+    state = state.update({ changes: { from, to: from + "Before".length, insert: "After" } }).state;
+    ensureSyntaxTree(state, state.doc.length);
+    expect(mask).not.toHaveBeenCalled();
+    expect(state.doc.toString()).toBe(source.replace("Before", "After"));
+    if (!state.field(fileMarkdownFrontmatter)) {
+      for (const closing of ["---", "..."]) {
+        const closed = state.update({
+          changes: { from: state.doc.length, insert: `${closing}\n` },
+        }).state;
+        expect(ensureSyntaxTree(closed, closed.doc.length)?.toString()).not.toContain("ATXHeading");
+        expect(
+          presentFileMarkdown(closed, new Map(), []).some(
+            (item) => item.kind === "line" && item.headingLevel === 1,
+          ),
+        ).toBe(false);
+        const restored = closed.update({
+          changes: { from: state.doc.length, to: closed.doc.length },
+        }).state;
+        expect(ensureSyntaxTree(restored, restored.doc.length)?.toString()).toContain("ATXHeading");
+        expect(
+          presentFileMarkdown(restored, new Map(), []).some(
+            (item) => item.kind === "line" && item.headingLevel === 1,
+          ),
+        ).toBe(true);
+      }
+    }
+  }
 });
