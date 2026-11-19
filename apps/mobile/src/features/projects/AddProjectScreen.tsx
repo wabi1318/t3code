@@ -76,7 +76,12 @@ import * as Order from "effect/Order";
 import { AsyncResult } from "effect/reactivity";
 import { useAtomValue } from "@effect/atom-react";
 import { cn } from "../../lib/cn";
-import { useProjects, useServerConfigs, waitForProject } from "../../state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShell,
+  waitForProject,
+} from "../../state/entities";
 import { filesystemEnvironment } from "../../state/filesystem";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
@@ -1289,12 +1294,14 @@ export function AddProjectLocalFolderScreen(props: {
     AuthOrchestrationOperateScope,
   );
   const requestedEnvironmentId = stringParam(props.environmentId);
+  const switchTarget =
+    props.workspaceSwitch && environment && environment.environmentId === requestedEnvironmentId
+      ? { environmentId: environment.environmentId, threadId: props.workspaceSwitch.threadId }
+      : null;
+  const switchThread = useThreadShell(switchTarget);
+  const currentProjectId = switchThread?.projectId ?? props.workspaceSwitch?.sourceProjectId;
   const canSwitchWorkspace = useAtomValue(
-    projectEnvironment.switchThreadWorkspace.permissionAtom(
-      props.workspaceSwitch && environment?.environmentId === requestedEnvironmentId && environment
-        ? environment.environmentId
-        : null,
-    ),
+    projectEnvironment.switchThreadWorkspace.permissionAtom(switchTarget?.environmentId ?? null),
   );
   const canSubmit = props.workspaceSwitch ? canSwitchWorkspace : canCreateProject;
   const createProject = useCreateProject(environment);
@@ -1388,7 +1395,8 @@ export function AddProjectLocalFolderScreen(props: {
                   (project) =>
                     project.environmentId === environment.environmentId &&
                     !project.isScratch &&
-                    project.archivedAt == null,
+                    project.archivedAt == null &&
+                    (project.id !== currentProjectId || switchThread?.worktreePath != null),
                 )
                 .map((project) => (
                   <Pressable

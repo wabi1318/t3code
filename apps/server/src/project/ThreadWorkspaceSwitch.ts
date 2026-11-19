@@ -1,6 +1,7 @@
 import { ProjectId, type ThreadWorkspaceSwitchInput } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -8,6 +9,7 @@ import * as Schema from "effect/Schema";
 
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as ManagedProjectFolders from "./ManagedProjectFolders.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as ProjectService from "./ProjectService.ts";
 
@@ -30,6 +32,8 @@ const make = Effect.gen(function* () {
   const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+  const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
   const switchWorkspace = Effect.fn("ThreadWorkspaceSwitch.switchWorkspace")(
@@ -66,6 +70,19 @@ const make = Effect.gen(function* () {
           );
       const target = yield* projectService.withWorkspaceLock(input.workspaceRoot, (workspaceRoot) =>
         Effect.gen(function* () {
+          const scratchRoot = yield* managedFolders.scratchRoot;
+          if (Option.isSome(scratchRoot)) {
+            // Project paths preserve symlinks, so compare the folders they resolve to.
+            const [sharedFolder, selectedFolder] = yield* Effect.forEach(
+              [scratchRoot.value, workspaceRoot],
+              (folder) => fileSystem.realPath(folder).pipe(Effect.orElseSucceed(() => folder)),
+            );
+            if (selectedFolder === sharedFolder) {
+              return yield* new ThreadWorkspaceSwitchError({
+                message: "Choose a project folder instead of the shared scratch folder.",
+              });
+            }
+          }
           const found = yield* projectService.getByWorkspaceRoot(workspaceRoot);
           if (Option.isSome(found)) return { existing: found.value } as const;
           const projectId = yield* move(

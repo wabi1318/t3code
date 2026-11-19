@@ -39,6 +39,7 @@ import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -7179,9 +7180,22 @@ it.layer(layerScratchPromotionTest)("turning a No project thread into a project"
   );
 });
 
+const layerSwitchWorkspaceScratch = Layer.unwrap(
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const scratchRoot = yield* fs.makeTempDirectoryScoped();
+    return Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/work/switch-workspace/projects",
+      scratchRoot: Effect.succeedSome(scratchRoot),
+    });
+  }),
+).pipe(Layer.provide(NodeServices.layer));
+
 it.layer(
   ThreadWorkspaceSwitch.layer.pipe(
-    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    Layer.provideMerge(
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerSwitchWorkspaceScratch),
+    ),
     Layer.provideMerge(layerProjectDeletionTest),
   ),
 )("switching a thread's working folder", (it) => {
@@ -7193,10 +7207,18 @@ it.layer(
       const eventSink = yield* EventSink.EventSinkV2;
       const tasks = yield* ScheduledTaskService.ScheduledTaskService;
       const threads = yield* ThreadManagementService.ThreadManagementService;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+      const scratchRoot = Option.getOrThrow(yield* managedFolders.scratchRoot);
+      const aliasParent = yield* fs.makeTempDirectoryScoped();
+      const scratchAlias = path.join(aliasParent, "scratch-alias");
+      yield* fs.symlink(scratchRoot, scratchAlias);
       const threadId = ThreadId.make("switch-workspace-thread");
       const sourceProjectId = ProjectId.make("switch-workspace-source");
       const sourceFolder = "/work/switch-workspace/source";
-      const targetFolder = "/work/switch-workspace/new-folder";
+      const targetFolder = path.join(scratchRoot, "individual-folder");
+      yield* fs.makeDirectory(targetFolder);
       yield* projects.create({
         commandId: CommandId.make("switch-workspace-create-project"),
         projectId: sourceProjectId,
@@ -7218,6 +7240,28 @@ it.layer(
         creationSource: "web",
       });
       const messageId = MessageId.make("switch-workspace-original-message");
+      yield* projects.create({
+        commandId: CommandId.make("switch-workspace-scratch-project"),
+        projectId: ProjectId.make("switch-workspace-scratch"),
+        title: "No project",
+        workspaceRoot: scratchRoot,
+      });
+      for (const [index, workspaceRoot] of [scratchAlias, scratchRoot].entries()) {
+        const sharedScratch = yield* workspace
+          .switchWorkspace({
+            commandId: CommandId.make(`switch-workspace-into-shared-scratch:${index}`),
+            threadId,
+            sourceProjectId,
+            workspaceRoot,
+            moveScheduledTasks: true,
+          })
+          .pipe(Effect.flip);
+        assert.include(sharedScratch.message, "shared scratch folder");
+      }
+      assert.equal(
+        (yield* orchestrator.getThreadProjection(threadId)).thread.projectId,
+        sourceProjectId,
+      );
       yield* orchestrator.dispatch({
         type: "message.dispatch",
         commandId: CommandId.make("switch-workspace-original-message"),

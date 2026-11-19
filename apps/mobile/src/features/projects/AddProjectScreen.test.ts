@@ -28,6 +28,7 @@ const state = vi.hoisted(() => ({
     title: string;
     workspaceRoot: string;
   }[],
+  switchSourceWorktree: null as string | null,
   createResult: null as Promise<unknown> | null,
   createNewResult: null as Promise<unknown> | null,
   startCloneResult: null as Promise<unknown> | null,
@@ -114,6 +115,7 @@ vi.mock("../../state/session", () => ({
 }));
 vi.mock("../../state/entities", () => ({
   useProjects: () => state.existingProjects,
+  useThreadShell: () => ({ worktreePath: state.switchSourceWorktree }),
   waitForProject: state.waitForProject,
   useServerConfigs: () =>
     new Map([
@@ -219,6 +221,12 @@ function findAction(
     return node.props.disabled && !includeDisabled ? null : (node.props.onPress ?? null);
   }
   return findAction(node.props.children, label, includeDisabled);
+}
+
+function includesText(node: ReactNode, text: string): boolean {
+  if (Array.isArray(node)) return node.some((child) => includesText(child, text));
+  if (node === text) return true;
+  return isValidElement<{ children?: ReactNode }>(node) && includesText(node.props.children, text);
 }
 
 const mountedRoots: ReturnType<typeof createRoot>[] = [];
@@ -501,6 +509,47 @@ describe("add project source environment", () => {
 });
 
 describe("local project navigation", () => {
+  it.each([
+    { worktreePath: null, showsSource: false },
+    { worktreePath: "/work/source-worktree", showsSource: true },
+  ])(
+    "shows the source project only when it changes the working folder ($showsSource)",
+    ({ worktreePath, showsSource }) => {
+      const existingProjects = state.existingProjects;
+      state.switchSourceWorktree = worktreePath;
+      state.existingProjects = [
+        {
+          environmentId: "environment",
+          id: "source",
+          title: "Source project",
+          workspaceRoot: "/work/source",
+        },
+        {
+          environmentId: "environment",
+          id: "destination",
+          title: "Other project",
+          workspaceRoot: "/work/other",
+        },
+      ];
+      try {
+        const screen = renderScreen(() =>
+          AddProjectLocalFolderScreen({
+            environmentId: "environment",
+            workspaceSwitch: {
+              threadId: ThreadId.make("thread"),
+              sourceProjectId: ProjectId.make("source"),
+            },
+          }),
+        );
+        expect(includesText(screen, "Source project")).toBe(showsSource);
+        expect(includesText(screen, "Other project")).toBe(true);
+      } finally {
+        state.switchSourceWorktree = null;
+        state.existingProjects = existingProjects;
+      }
+    },
+  );
+
   it("waits for confirmation before moving the thread and its scheduled tasks", async () => {
     state.scopes = new Set([AuthOrchestrationOperateScope]);
     state.baseDirectory = "/work/other-project";
