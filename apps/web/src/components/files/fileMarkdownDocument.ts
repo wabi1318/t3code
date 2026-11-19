@@ -1,520 +1,415 @@
-import { Extension, Node, type JSONContent, type Extensions } from "@tiptap/core";
-import { Fragment, Slice, type Node as DocumentNode, type Schema } from "@tiptap/pm/model";
-import StarterKit from "@tiptap/starter-kit";
-import { BulletList, OrderedList } from "@tiptap/extension-list";
-import TaskItem from "@tiptap/extension-task-item";
-import TaskList from "@tiptap/extension-task-list";
-import type { BlockContent, Literal, PhrasingContent, RootContent } from "mdast";
-import { gfmToMarkdown } from "mdast-util-gfm";
-import { mathToMarkdown } from "mdast-util-math";
-import { defaultHandlers, toMarkdown } from "mdast-util-to-markdown";
+import { EditorState, StateField, type Text } from "@codemirror/state";
+import { ParseContext, syntaxTree } from "@codemirror/language";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import type { MarkdownConfig } from "@lezer/markdown";
+import type { Nodes } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
-
 import { maskMarkdownFrontmatter } from "@t3tools/shared/markdownFrontmatter";
-import { setMarkdownTaskChecked } from "./filePreviewMode";
-
-interface RawMarkdown extends Literal {
-  type: "fileMarkdownRaw";
-  value: string;
-}
-
-declare module "mdast" {
-  interface ListData {
-    fileMarkdownBullet?: "-" | "+" | "*";
-    fileMarkdownDelimiter?: "." | ")";
-  }
-  interface BlockContentMap {
-    fileMarkdownRaw: RawMarkdown;
-  }
-  interface PhrasingContentMap {
-    fileMarkdownRaw: RawMarkdown;
-  }
-  interface RootContentMap {
-    fileMarkdownRaw: RawMarkdown;
-  }
-}
 
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
-
-const rawBlock = Node.create({
-  name: "fileMarkdownRawBlock",
-  group: "block",
-  atom: true,
-  addAttributes: () => ({ source: { default: "" } }),
-  parseHTML: () => [
-    { tag: "div[data-markdown-raw]", getAttrs: (element) => ({ source: element.textContent }) },
+const literalBlockNames = new Set([
+  "FencedCode",
+  "CodeBlock",
+  "HTMLBlock",
+  "CommentBlock",
+  "ProcessingInstructionBlock",
+  "MathBlock",
+]);
+const mathSyntax: MarkdownConfig = {
+  defineNodes: [{ name: "MathBlock", block: true }, "InlineMath"],
+  parseBlock: [
+    {
+      name: "MathBlock",
+      before: "FencedCode",
+      parse(context, line) {
+        const fence = /^\${2,}[ \t]*$/.exec(line.text.slice(line.pos));
+        if (!fence) return false;
+        const from = context.lineStart + line.pos;
+        const size = fence[0].trim().length;
+        let to = context.lineStart + line.text.length;
+        while (context.nextLine()) {
+          // Lezer omits continuation depth from Line's type, but eager blocks need its container boundary.
+          if ("depth" in line && typeof line.depth === "number" && line.depth < context.depth)
+            break;
+          to = context.lineStart + line.text.length;
+          if (new RegExp("^\\${" + size + ",}[ \\t]*$").test(line.text.slice(line.pos))) {
+            context.nextLine();
+            break;
+          }
+        }
+        context.addElement(context.elt("MathBlock", from, to));
+        return true;
+      },
+    },
   ],
-  renderHTML: ({ node }) => ["div", { "data-markdown-raw": "" }, node.attrs.source],
-});
-
-const rawInline = rawBlock.extend({
-  name: "fileMarkdownRawInline",
-  group: "inline",
-  inline: true,
-  parseHTML: () => [
-    { tag: "span[data-markdown-raw]", getAttrs: (element) => ({ source: element.textContent }) },
+  parseInline: [
+    {
+      name: "InlineMath",
+      before: "Emphasis",
+      parse(context, next, from) {
+        if (next !== "$".charCodeAt(0)) return -1;
+        const delimiter = context.char(from + 1) === next ? "$$" : "$";
+        const rest = context.slice(from + delimiter.length, context.end);
+        const end = rest.indexOf(delimiter);
+        if (end < 0) return -1;
+        const to = from + delimiter.length + end + delimiter.length;
+        return context.addElement(context.elt("InlineMath", from, to));
+      },
+    },
   ],
-  renderHTML: ({ node }) => ["span", { "data-markdown-raw": "" }, node.attrs.source],
-});
+};
 
-function tableNode(name: string, tag: string, content: string) {
-  return Node.create({
-    name,
-    group: name === "fileMarkdownTable" ? "block" : undefined,
-    content,
-    isolating: true,
-    parseHTML: () => [{ tag }],
-    addAttributes: () => ({ align: { default: null } }),
-    renderHTML: ({ node }) => [
-      tag,
-      { style: node.attrs.align ? `text-align: ${node.attrs.align}` : null },
-      0,
-    ],
-  });
-}
+const opensFrontmatter = /^\uFEFF?---[ \t]*$/;
+const closesFrontmatter = /^(?:---|\.\.\.)[ \t]*$/;
 
-export const fileMarkdownExtensions: Extensions = [
-  StarterKit.configure({
-    bulletList: false,
-    orderedList: false,
-    link: { openOnClick: false },
-    underline: false,
-    trailingNode: false,
-  }),
-  BulletList.extend({ content: "(listItem | taskItem)+" }),
-  OrderedList.extend({ content: "(listItem | taskItem)+" }),
-  TaskList,
-  TaskItem.configure({ nested: true }),
-  tableNode("fileMarkdownTable", "table", "fileMarkdownRow+"),
-  tableNode("fileMarkdownRow", "tr", "(fileMarkdownHeader | fileMarkdownCell)+"),
-  tableNode("fileMarkdownHeader", "th", "paragraph+"),
-  tableNode("fileMarkdownCell", "td", "paragraph+"),
-  rawBlock,
-  rawInline,
-  Extension.create({
-    name: "fileMarkdownSource",
-    addGlobalAttributes: () => [
-      {
-        types: [
-          "paragraph",
-          "heading",
-          "bulletList",
-          "orderedList",
-          "taskList",
-          "blockquote",
-          "codeBlock",
-          "horizontalRule",
-          "fileMarkdownTable",
-          "fileMarkdownRawBlock",
-        ],
-        attributes: { sourceId: { default: null } },
-      },
-      {
-        types: ["bulletList", "orderedList", "taskList"],
-        attributes: {
-          bullet: { default: "-" },
-          delimiter: { default: "." },
-          spread: { default: false },
-        },
-      },
-      {
-        types: ["listItem", "taskItem"],
-        attributes: { spread: { default: false } },
-      },
-      { types: ["codeBlock"], attributes: { meta: { default: null, rendered: false } } },
-    ],
-  }),
-];
-
-interface SourceBlock {
-  readonly node: DocumentNode;
-  readonly source: string;
-  readonly before: string;
-  readonly taskMarkers: ReadonlyArray<number>;
-}
-
-export interface FileMarkdownDocument {
-  readonly document: DocumentNode;
-  readonly blocks: ReadonlyMap<number, SourceBlock>;
-  readonly prefix: string;
-  readonly suffix: string;
-  readonly newline: string;
-  readonly references: string;
-}
-
-export function stripFileMarkdownSourceIds(slice: Slice): Slice {
-  const clearSourceId = (node: DocumentNode): DocumentNode =>
-    node.isText
-      ? node
-      : node.type.create(
-          { ...node.attrs, sourceId: null },
-          Fragment.fromArray(
-            Array.from({ length: node.childCount }, (_, index) => clearSourceId(node.child(index))),
-          ),
-          node.marks,
-        );
-  return new Slice(
-    Fragment.fromArray(
-      Array.from({ length: slice.content.childCount }, (_, index) =>
-        clearSourceId(slice.content.child(index)),
-      ),
-    ),
-    slice.openStart,
-    slice.openEnd,
-  );
-}
-
-function originalSource(node: RootContent | PhrasingContent, source: string): string {
-  if (node.type === "html") return node.value;
-  if (node.type === "link" || node.type === "linkReference")
-    return toMarkdown(node, { extensions: [gfmToMarkdown(), mathToMarkdown()] }).replace(/\n$/, "");
-  if (node.type === "code") return toMarkdown(node, { fences: true }).replace(/\n$/, "");
-  if (node.type === "math") {
-    if (node.position && node.position.start.line === node.position.end.line)
-      return source.slice(node.position.start.offset, node.position.end.offset);
-    const opening = source.slice(node.position?.start.offset).split(/\r?\n/)[0]!;
-    const closing = /^\$+/.exec(opening)?.[0] ?? "$$";
-    return `${opening}\n${node.value}\n${closing}`;
-  }
-  return source.slice(node.position?.start.offset, node.position?.end.offset);
-}
-
-function parseInline(nodes: ReadonlyArray<PhrasingContent>, source: string): JSONContent[] {
-  return nodes.flatMap((node): JSONContent[] => {
-    if (node.type === "text") return node.value ? [{ type: "text", text: node.value }] : [];
-    if (node.type === "break") return [{ type: "hardBreak" }];
-    if (node.type === "html" && /^<br\s*\/?>$/i.test(node.value)) return [{ type: "hardBreak" }];
-    if (node.type === "inlineCode")
-      return [{ type: "text", text: node.value, marks: [{ type: "code" }] }];
-    if (node.type === "strong" || node.type === "emphasis" || node.type === "delete") {
-      const mark = { type: { strong: "bold", emphasis: "italic", delete: "strike" }[node.type] };
-      return parseInline(node.children, source).map((child) => ({
-        ...child,
-        marks: [mark, ...(child.marks ?? [])],
-      }));
+function readFrontmatterEnd(document: Text): number {
+  const opening = document.sliceString(0, Math.min(document.length, "\uFEFF--- ".length));
+  if (!/^\uFEFF?---(?:[ \t\r\n]|$)/.test(opening)) return 0;
+  const firstLine = document.line(1);
+  if (!opensFrontmatter.test(firstLine.text) || document.lines === 1) return 0;
+  let from = firstLine.to + 1;
+  for (const line of document.iterLines(firstLine.number + 1)) {
+    if (closesFrontmatter.test(line)) {
+      const end = Math.min(document.length, from + line.length + 1);
+      return fileMarkdownFrontmatterEnd(document.sliceString(0, end));
     }
-    return [{ type: "fileMarkdownRawInline", attrs: { source: originalSource(node, source) } }];
-  });
-}
-
-function parseBlock(node: RootContent, source: string): JSONContent {
-  switch (node.type) {
-    case "paragraph":
-      if (node.children.length === 1 && node.children[0]?.type === "image") break;
-      return { type: "paragraph", content: parseInline(node.children, source) };
-    case "heading":
-      return {
-        type: "heading",
-        attrs: { level: node.depth },
-        content: parseInline(node.children, source),
-      };
-    case "blockquote":
-      return {
-        type: "blockquote",
-        content: node.children.map((child) => parseBlock(child, source)),
-      };
-    case "list":
-      return {
-        type: node.ordered
-          ? "orderedList"
-          : node.children.every((item) => item.checked !== null && item.checked !== undefined)
-            ? "taskList"
-            : "bulletList",
-        attrs: {
-          start: node.start ?? 1,
-          bullet: source[node.position!.start.offset!] ?? "-",
-          delimiter: /^\d+([.)])/.exec(source.slice(node.position!.start.offset!))?.[1] ?? ".",
-          spread: node.spread ?? false,
-        },
-        content: node.children.map((item) => ({
-          type: typeof item.checked === "boolean" ? "taskItem" : "listItem",
-          attrs: { checked: item.checked, spread: item.spread ?? false },
-          content: item.children.map((child) => parseBlock(child, source)),
-        })),
-      };
-    case "code":
-      break;
-    case "thematicBreak":
-      return { type: "horizontalRule" };
-    case "table":
-      return {
-        type: "fileMarkdownTable",
-        content: node.children.map((row, index) => ({
-          type: "fileMarkdownRow",
-          content: row.children.map((cell, column) => ({
-            type: index === 0 ? "fileMarkdownHeader" : "fileMarkdownCell",
-            attrs: { align: node.align?.[column] },
-            content: [{ type: "paragraph", content: parseInline(cell.children, source) }],
-          })),
-        })),
-      };
+    from += line.length + 1;
   }
-  return { type: "fileMarkdownRawBlock", attrs: { source: originalSource(node, source) } };
+  return 0;
 }
 
-function taskMarkerOffsets(nodes: ReadonlyArray<RootContent>, source: string): number[] {
-  return nodes.flatMap((node) => {
-    if (node.type === "blockquote") return taskMarkerOffsets(node.children, source);
-    if (node.type !== "list") return [];
-    return node.children.flatMap((item) => {
-      const start = item.position!.start.offset!;
-      const marker =
-        typeof item.checked === "boolean"
-          ? /^(?:[*+-]|\d+[.)])[ \t]+\[/.exec(source.slice(start))
-          : null;
-      return [
-        ...(marker ? [start + marker[0].length - 1] : []),
-        ...taskMarkerOffsets(item.children, source),
-      ];
+export const fileMarkdownFrontmatter = StateField.define({
+  create: (state) => readFrontmatterEnd(state.doc),
+  update(end, transaction) {
+    if (!transaction.docChanged) return end;
+    if (!opensFrontmatter.test(transaction.state.doc.line(1).text)) return 0;
+    const boundary = end || transaction.startState.doc.line(1).to;
+    let recheck = false;
+    transaction.changes.iterChangedRanges((from, _to, nextFrom, nextTo) => {
+      if (from <= boundary) recheck = true;
+      if (end) return;
+      const first = transaction.state.doc.lineAt(nextFrom).number;
+      const last = transaction.state.doc.lineAt(nextTo).number;
+      for (const line of transaction.state.doc.iterLines(first, last + 1)) {
+        if (closesFrontmatter.test(line)) recheck = true;
+      }
     });
+    return recheck ? readFrontmatterEnd(transaction.state.doc) : transaction.changes.mapPos(end);
+  },
+});
+
+const sourceLanguage = markdown({
+  base: markdownLanguage,
+  extensions: mathSyntax,
+  completeHTMLTags: false,
+  pasteURLAsLink: false,
+});
+
+export function fileMarkdownLanguage() {
+  const language = markdown({
+    base: sourceLanguage.language,
+    extensions: {
+      wrap(inner, input, fragments, ranges) {
+        const end =
+          ParseContext.get()?.state.field(fileMarkdownFrontmatter, false) ??
+          fileMarkdownFrontmatterEnd(input.read(0, input.length));
+        if (!end) return inner;
+        const mask = (value: string, from: number) =>
+          from >= end
+            ? value
+            : value.slice(0, end - from).replace(/[^\r\n]/g, " ") + value.slice(end - from);
+        // メタ情報の各行は空白へ置き換わり、解析器は部分木の再利用前にそれらの行を読み飛ばす。
+        return sourceLanguage.language.parser.startParse(
+          {
+            length: input.length,
+            lineChunks: input.lineChunks,
+            chunk: (from) => mask(input.chunk(from), from),
+            read: (from, to) => mask(input.read(from, to), from),
+          },
+          fragments,
+          ranges,
+        );
+      },
+    },
+    completeHTMLTags: false,
+    pasteURLAsLink: false,
   });
+  return [fileMarkdownFrontmatter, language];
 }
 
-export function parseFileMarkdown(source: string, schema: Schema): FileMarkdownDocument {
-  const root = parser.parse(maskMarkdownFrontmatter(source));
-  const content = root.children.map((node, sourceId) => {
-    const block = parseBlock(node, source);
-    return { ...block, attrs: { ...block.attrs, sourceId } };
-  });
-  const document = schema.nodeFromJSON({
-    type: "doc",
-    content: content.length ? content : [{ type: "paragraph" }],
-  });
-  const blocks = new Map<number, SourceBlock>();
-  let end = root.children[0]?.position?.start.offset ?? source.length;
-  const prefix = source.slice(0, end);
-  document.forEach((node, _offset, index) => {
-    const original = root.children[index];
-    if (!original) return;
-    const start = original.position!.start.offset!;
-    const nextEnd = original.position!.end.offset!;
-    blocks.set(index, {
-      node,
-      source: source.slice(start, nextEnd),
-      before: source.slice(end, start),
-      taskMarkers: taskMarkerOffsets([original], source).map((offset) => offset - start),
-    });
-    end = nextEnd;
-  });
-  return {
-    document,
-    blocks,
-    prefix,
-    suffix: source.slice(end),
-    newline: source.includes("\r\n") ? "\r\n" : "\n",
-    references: root.children
-      .filter((node) => node.type === "definition" || node.type === "footnoteDefinition")
-      .map((node) => originalSource(node, source))
-      .join("\n\n"),
+export function parseFileMarkdown(source: string) {
+  const tree = parser.parse(maskMarkdownFrontmatter(source));
+  const definitions = new Map<string, string>();
+  const definitionRanges: { from: number; to: number; identifier: string; source: string }[] = [];
+  const footnoteRanges: { from: number; to: number }[] = [];
+  const collect = (node: Nodes) => {
+    if (node.type === "definition") {
+      const from = node.position!.start.offset!;
+      const to = node.position!.end.offset!;
+      if (!definitions.has(node.identifier))
+        definitions.set(node.identifier, source.slice(from, to));
+      definitionRanges.push({
+        from,
+        to,
+        identifier: node.identifier,
+        source: source.slice(from, to),
+      });
+    }
+    if (node.type === "footnoteDefinition")
+      footnoteRanges.push({ from: node.position!.start.offset!, to: node.position!.end.offset! });
+    if ("children" in node) for (const child of node.children) collect(child);
   };
+  collect(tree);
+  return { definitions, definitionRanges, footnoteRanges, hasFootnotes: footnoteRanges.length > 0 };
 }
 
-function inlineMarkdown(parent: DocumentNode, inTable = false): PhrasingContent[] {
-  const children: PhrasingContent[] = [];
-  parent.forEach((node) => {
-    if (node.type.name === "hardBreak") {
-      children.push(inTable ? { type: "fileMarkdownRaw", value: "<br>" } : { type: "break" });
+function fileMarkdownFrontmatterEnd(source: string) {
+  const masked = maskMarkdownFrontmatter(source);
+  if (masked === source) return 0;
+  const body = masked.search(/\S/);
+  let end = body < 0 ? source.length : body;
+  while (end > 0 && source[end - 1] === masked[end - 1]) end--;
+  return end + (/^[ \t]*(?:\r\n|\r|\n|$)/.exec(source.slice(end))?.[0].length ?? 0);
+}
+
+export function refreshFileMarkdownReferences(
+  state: EditorState,
+  previous: ReturnType<typeof parseFileMarkdown>["definitionRanges"],
+  frontmatterEnd = 0,
+  changed = { from: 0, to: state.doc.length },
+  previousFootnotes: ReturnType<typeof parseFileMarkdown>["footnoteRanges"] = [],
+) {
+  const tree = syntaxTree(state);
+  const cache = new Map(previous.map((entry) => [entry.source, entry.identifier]));
+  const definitionRanges = previous.filter(
+    (entry) =>
+      entry.to > frontmatterEnd &&
+      (entry.to < changed.from || entry.from > changed.to || entry.from >= tree.length),
+  );
+  tree.iterate({
+    from: changed.from,
+    to: changed.to,
+    enter(node) {
+      if (node.to <= frontmatterEnd) return false;
+      if (literalBlockNames.has(node.name)) return false;
+      if (node.name !== "LinkReference") return;
+      const source = state.sliceDoc(node.from, node.to);
+      const identifier =
+        cache.get(source) ?? parseFileMarkdown(source).definitionRanges[0]?.identifier;
+      if (identifier) definitionRanges.push({ from: node.from, to: node.to, identifier, source });
+      return false;
+    },
+  });
+  definitionRanges.sort((left, right) => left.from - right.from);
+  const definitions = new Map<string, string>();
+  for (const entry of definitionRanges)
+    if (!definitions.has(entry.identifier)) definitions.set(entry.identifier, entry.source);
+  const footnoteSpan = { ...changed };
+  for (const range of previousFootnotes) {
+    if (range.to >= changed.from && range.from <= changed.to) {
+      footnoteSpan.from = Math.min(footnoteSpan.from, range.from);
+      footnoteSpan.to = Math.max(footnoteSpan.to, range.to);
+    }
+  }
+  footnoteSpan.from = Math.max(frontmatterEnd, state.doc.lineAt(footnoteSpan.from).from);
+  footnoteSpan.to = Math.max(
+    footnoteSpan.from,
+    state.doc.lineAt(Math.min(footnoteSpan.to, state.doc.length)).to,
+  );
+  const footnoteRanges = previousFootnotes.filter(
+    (range) =>
+      range.to > frontmatterEnd && (range.to < footnoteSpan.from || range.from > footnoteSpan.to),
+  );
+  const source = state.sliceDoc(footnoteSpan.from, footnoteSpan.to);
+  if (source.includes("[^"))
+    for (const range of parseFileMarkdown(source).footnoteRanges) {
+      const from = range.from + footnoteSpan.from;
+      let context: SyntaxNode | null = tree.resolveInner(from, 1);
+      while (context && !literalBlockNames.has(context.name)) context = context.parent;
+      if (context) continue;
+      footnoteRanges.push({ from, to: range.to + footnoteSpan.from });
+    }
+  return { definitions, definitionRanges, footnoteRanges, hasFootnotes: footnoteRanges.length > 0 };
+}
+
+interface SourceRange {
+  from: number;
+  to: number;
+}
+type SyntaxNode = ReturnType<typeof syntaxTree>["topNode"];
+type MarkdownPresentation = SourceRange &
+  (
+    | { kind: "hide" }
+    | { kind: "mark"; tag: string }
+    | { kind: "line"; className: string; headingLevel?: number }
+    | { kind: "preview"; text: string; footnotes?: boolean }
+    | { kind: "bullet"; label: string; checked: boolean | null; markerOffset: number }
+  );
+const inlineTags = {
+  StrongEmphasis: "strong",
+  Emphasis: "em",
+  Strikethrough: "s",
+  InlineCode: "code",
+};
+const previewNodes = new Set([...literalBlockNames, "Table", "HorizontalRule"]);
+const complexInline = new Set([
+  "Image",
+  "Link",
+  "Autolink",
+  "HTMLTag",
+  "Comment",
+  "ProcessingInstruction",
+  "Entity",
+  "Escape",
+  "InlineMath",
+]);
+
+function children(node: SyntaxNode) {
+  const result: SyntaxNode[] = [];
+  for (let child = node.firstChild; child; child = child.nextSibling) result.push(child);
+  return result;
+}
+
+function isComplex(node: SyntaxNode, cache: WeakMap<object, boolean>): boolean {
+  const key = node.tree ?? node;
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+  const complex =
+    previewNodes.has(node.name) ||
+    complexInline.has(node.name) ||
+    children(node).some((child) => isComplex(child, cache));
+  cache.set(key, complex);
+  return complex;
+}
+
+export function presentFileMarkdown(
+  state: EditorState,
+  definitions: ReadonlyMap<string, string>,
+  selections: readonly SourceRange[],
+  mode: "all" | "blocks" | "inline" = "all",
+  viewport: SourceRange = { from: 0, to: state.doc.length },
+  complexity: WeakMap<object, boolean> = new WeakMap(),
+): MarkdownPresentation[] {
+  const result: MarkdownPresentation[] = [];
+  const overlap = (node: SourceRange, selection: SourceRange) =>
+    selection.from <= node.to && selection.to >= state.doc.lineAt(node.from).from;
+  const active = (node: SourceRange) => selections.some((selection) => overlap(node, selection));
+  const hide = (node: SourceRange) => {
+    if (node.to > node.from) result.push({ kind: "hide", from: node.from, to: node.to });
+  };
+  const preview = (node: SyntaxNode) => {
+    const from = state.doc.lineAt(node.from).from;
+    const references = new Set<string>();
+    const collect = (child: SyntaxNode) => {
+      if (child.name === "Link" || child.name === "Image") {
+        const source = state.sliceDoc(child.from, child.to);
+        const match = /\]\[([^\]]*)\]$/.exec(source) ?? /^!?\[([^\]]+)\]$/.exec(source);
+        const key = match ? match[1] || /^!?\[([^\]]+)\]/.exec(source)?.[1] : undefined;
+        const definition = key
+          ? definitions.get(key.trim().replace(/\s+/g, " ").toLowerCase())
+          : undefined;
+        if (definition) references.add(definition);
+      }
+      for (const nested of children(child)) collect(nested);
+    };
+    collect(node);
+    result.push({
+      kind: "preview",
+      from,
+      to: node.to,
+      text: [state.sliceDoc(from, node.to), ...references].join("\n\n"),
+    });
+  };
+  const render = (node: SyntaxNode, reveal = false) => {
+    if (node.to < viewport.from || node.from > viewport.to) return;
+    const complex =
+      previewNodes.has(node.name) ||
+      ["ListItem", "Blockquote", "Paragraph", "Task"].includes(node.name) ||
+      /Heading/.test(node.name);
+    if (complex && isComplex(node, complexity)) {
+      if (mode !== "inline" && !active(node)) preview(node);
       return;
     }
-    let content: PhrasingContent =
-      node.type.name === "fileMarkdownRawInline"
-        ? {
-            type: "fileMarkdownRaw",
-            value: inTable
-              ? node.attrs.source.replace(/(\\*)\|/g, (match: string, escapes: string) =>
-                  escapes.length % 2 === 0 ? `\\${match}` : match,
-                )
-              : node.attrs.source,
-          }
-        : { type: "text", value: node.text ?? "" };
-    for (const mark of node.marks.toReversed()) {
-      switch (mark.type.name) {
-        case "code":
-          content = { type: "inlineCode", value: node.text ?? "" };
-          break;
-        case "bold":
-          content = { type: "strong", children: [content] };
-          break;
-        case "italic":
-          content = { type: "emphasis", children: [content] };
-          break;
-        case "strike":
-          content = { type: "delete", children: [content] };
-          break;
-        case "link":
-          content = {
-            type: "link",
-            url: mark.attrs.href,
-            title: mark.attrs.title,
-            children: [content],
-          };
-          break;
-      }
+    if (mode === "blocks") {
+      if (["Paragraph", "Task"].includes(node.name) || /Heading/.test(node.name)) return;
+      for (const child of children(node)) render(child);
+      return;
     }
-    children.push(content);
-  });
-  return children;
-}
-
-function childBlocks(node: DocumentNode): BlockContent[] {
-  const children: BlockContent[] = [];
-  node.forEach((child) => children.push(blockMarkdown(child)));
-  return children;
-}
-
-function blockMarkdown(node: DocumentNode): BlockContent {
-  switch (node.type.name) {
-    case "paragraph":
-      return { type: "paragraph", children: inlineMarkdown(node) };
-    case "heading":
-      return { type: "heading", depth: node.attrs.level, children: inlineMarkdown(node) };
-    case "blockquote":
-      return { type: "blockquote", children: childBlocks(node) };
-    case "codeBlock":
-      return {
-        type: "code",
-        lang: node.attrs.language,
-        meta: node.attrs.meta,
-        value: node.textContent,
-      };
-    case "horizontalRule":
-      return { type: "thematicBreak" };
-    case "bulletList":
-    case "orderedList":
-    case "taskList": {
-      const children: Extract<RootContent, { type: "list" }>["children"] = [];
-      node.forEach((item) =>
-        children.push({
-          type: "listItem",
-          checked: item.type.name === "taskItem" ? item.attrs.checked : null,
-          spread: item.attrs.spread === true,
-          children: childBlocks(item),
-        }),
-      );
-      return {
-        type: "list",
-        ordered: node.type.name === "orderedList",
-        start: node.attrs.start ?? 1,
-        spread: node.attrs.spread === true,
-        data: {
-          fileMarkdownBullet:
-            node.attrs.bullet === "+" || node.attrs.bullet === "*" ? node.attrs.bullet : "-",
-          fileMarkdownDelimiter: node.attrs.delimiter === ")" ? ")" : ".",
-        },
-        children,
-      };
-    }
-    case "fileMarkdownTable": {
-      const children: Extract<RootContent, { type: "table" }>["children"] = [];
-      const align: Extract<RootContent, { type: "table" }>["align"] = [];
-      node.forEach((row, _offset, rowIndex) => {
-        const cells: Extract<RootContent, { type: "tableCell" }>[] = [];
-        row.forEach((cell) => {
-          if (rowIndex === 0) align.push(cell.attrs.align);
-          const content: PhrasingContent[] = [];
-          cell.forEach((paragraph, _offset, index) => {
-            if (index > 0) content.push({ type: "fileMarkdownRaw", value: "<br><br>" });
-            content.push(...inlineMarkdown(paragraph, true));
-          });
-          cells.push({ type: "tableCell", children: content });
-        });
-        children.push({ type: "tableRow", children: cells });
+    if (node.name === "Paragraph" || node.name === "Task" || /Heading/.test(node.name))
+      reveal = active(node);
+    if (/^(ATX|Setext)Heading[1-6]$/.test(node.name)) {
+      const level = Number(node.name.at(-1));
+      result.push({
+        kind: "line",
+        from: node.from,
+        to: node.to,
+        className: `file-markdown-heading file-markdown-heading-${level}`,
+        headingLevel: level,
       });
-      return { type: "table", align, children };
     }
-    default:
-      return { type: "fileMarkdownRaw", value: node.attrs.source ?? "" };
-  }
-}
-
-function hasOnlyTaskCheckChanges(node: DocumentNode, original: DocumentNode): boolean {
-  const originalAttributes =
-    node.type.name === "taskItem"
-      ? { ...original.attrs, checked: node.attrs.checked }
-      : original.attrs;
-  if (
-    !node.hasMarkup(original.type, originalAttributes, original.marks) ||
-    node.text !== original.text ||
-    node.childCount !== original.childCount
+    if (node.name in inlineTags)
+      result.push({
+        kind: "mark",
+        from: node.from,
+        to: node.to,
+        tag: inlineTags[node.name as keyof typeof inlineTags],
+      });
+    if (node.name === "QuoteMark") {
+      result.push({ kind: "line", from: node.from, to: node.to, className: "file-markdown-quote" });
+      if (!active({ from: node.from, to: state.doc.lineAt(node.from).to })) hide(node);
+    }
+    if (
+      node.name === "ListMark" &&
+      !active({ from: node.from, to: state.doc.lineAt(node.from).to })
+    ) {
+      const marker = state.sliceDoc(node.from, node.to);
+      result.push({
+        kind: "bullet",
+        from: node.from,
+        to: node.to,
+        label: /^\d/.test(marker) ? marker : "•",
+        checked: null,
+        markerOffset: node.from,
+      });
+    }
+    if (node.name === "TaskMarker" && !reveal)
+      result.push({
+        kind: "bullet",
+        from: node.from,
+        to: node.to,
+        label: "",
+        checked: state.sliceDoc(node.from, node.to).toLowerCase() === "[x]",
+        markerOffset: node.from,
+      });
+    if (
+      !reveal &&
+      ["HeaderMark", "EmphasisMark", "StrikethroughMark", "CodeMark"].includes(node.name)
+    ) {
+      if (node.name === "HeaderMark" && node.parent?.name.startsWith("Setext"))
+        hide({ from: node.from, to: node.to });
+      else
+        hide({
+          from: node.from,
+          to:
+            node.name === "HeaderMark"
+              ? Math.min(
+                  state.doc.lineAt(node.to).to,
+                  node.to + (state.sliceDoc(node.to, node.to + 1) === " " ? 1 : 0),
+                )
+              : node.to,
+        });
+    }
+    for (const child of children(node)) render(child, reveal);
+  };
+  const root = syntaxTree(state).topNode;
+  for (
+    let node = root.childAfter(viewport.from);
+    node && node.from <= viewport.to;
+    node = node.nextSibling
   )
-    return false;
-  for (let index = 0; index < node.childCount; index += 1) {
-    if (!hasOnlyTaskCheckChanges(node.child(index), original.child(index))) return false;
-  }
-  return true;
-}
-
-function serializeTaskChecks(node: DocumentNode, original: SourceBlock): string | undefined {
-  if (!hasOnlyTaskCheckChanges(node, original.node)) return undefined;
-  const checks: boolean[] = [];
-  node.descendants((child) => {
-    if (child.type.name === "taskItem") checks.push(child.attrs.checked === true);
-  });
-  if (checks.length !== original.taskMarkers.length) return undefined;
-  return original.taskMarkers.reduce(
-    (source, offset, index) =>
-      /[xX]/.test(source[offset + 1] ?? "") === checks[index]
-        ? source
-        : setMarkdownTaskChecked(source, offset, checks[index]!),
-    original.source,
-  );
-}
-
-export function serializeFileMarkdown(
-  document: DocumentNode,
-  original: FileMarkdownDocument,
-): string {
-  const parts: string[] = [];
-  const seen = new Set<number>();
-  document.forEach((node, _offset, index) => {
-    const id: unknown = node.attrs.sourceId;
-    const block = typeof id === "number" && !seen.has(id) ? original.blocks.get(id) : undefined;
-    if (typeof id === "number") seen.add(id);
-    const before = index === 0 ? "" : block?.before || original.newline + original.newline;
-    const source = block?.node.eq(node)
-      ? block.source
-      : ((block ? serializeTaskChecks(node, block) : undefined) ??
-        toMarkdown(blockMarkdown(node), {
-          extensions: [gfmToMarkdown()],
-          handlers: {
-            fileMarkdownRaw: (raw) => raw.value,
-            listItem: (item, parent, state, info) => {
-              const checkable =
-                typeof item.checked === "boolean" && item.children[0]?.type === "paragraph";
-              const checkbox = `[${item.checked ? "x" : " "}] `;
-              const tracker = state.createTracker(info);
-              if (checkable) tracker.move(checkbox);
-              const value = defaultHandlers.listItem(item, parent, state, {
-                ...info,
-                ...tracker.current(),
-              });
-              // 項目番号が「)」で終わる場合も、保存時にチェックを保持する。
-              return checkable
-                ? value.replace(/^(?:[*+-]|\d+[.)])([\r\n]| {1,3})/, `$&${checkbox}`)
-                : value;
-            },
-            list: (list, parent, state, info) => {
-              const previous = state.options;
-              state.options = {
-                ...previous,
-                bullet: list.data?.fileMarkdownBullet ?? previous.bullet,
-                bulletOrdered: list.data?.fileMarkdownDelimiter ?? previous.bulletOrdered,
-              };
-              try {
-                return defaultHandlers.list(list, parent, state, info);
-              } finally {
-                state.options = previous;
-              }
-            },
-          },
-        })
-          .replace(/\n$/, "")
-          .replace(/\r\n?/g, "\n")
-          .replace(/\n/g, original.newline));
-    parts.push(before, source);
-  });
-  return original.prefix + parts.join("") + original.suffix;
+    render(node);
+  return result;
 }

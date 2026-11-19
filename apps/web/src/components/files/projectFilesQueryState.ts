@@ -35,6 +35,12 @@ export function optimisticFileAtom(
 
 // Dirty contents must survive a closed preview, including failed or unauthorized saves.
 const unsavedFileMounts = new Map<ReturnType<typeof optimisticFileAtom>, () => void>();
+// 同じ本文に戻った外部更新を、自分の入力の再通知と区別する。
+const fileEditOrigins = new WeakMap<ProjectReadFileResult, object>();
+
+export function getProjectFileEditOrigin(file: ProjectReadFileResult): object | undefined {
+  return fileEditOrigins.get(file);
+}
 
 function releaseUnsavedFile(atom: ReturnType<typeof optimisticFileAtom>): void {
   const unmount = unsavedFileMounts.get(atom);
@@ -86,20 +92,20 @@ export function setProjectFileQueryData(
   cwd: string,
   relativePath: string,
   contents: string,
+  editOrigin?: object,
 ): void {
   const atom = optimisticFileAtom(environmentId, cwd, relativePath);
   if (!unsavedFileMounts.has(atom)) {
     unsavedFileMounts.set(atom, appAtomRegistry.mount(atom));
   }
-  appAtomRegistry.set(atom, {
-    confirmedAgainst: undefined,
-    data: {
-      relativePath,
-      contents,
-      byteLength: new TextEncoder().encode(contents).byteLength,
-      truncated: false,
-    },
-  });
+  const data = {
+    relativePath,
+    contents,
+    byteLength: new TextEncoder().encode(contents).byteLength,
+    truncated: false,
+  } satisfies ProjectReadFileResult;
+  if (editOrigin) fileEditOrigins.set(data, editOrigin);
+  appAtomRegistry.set(atom, { confirmedAgainst: undefined, data });
 }
 
 export function getOptimisticProjectFileQueryData(

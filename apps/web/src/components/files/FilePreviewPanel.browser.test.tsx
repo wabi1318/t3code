@@ -1,3 +1,4 @@
+import { EditorView } from "@codemirror/view";
 import { EnvironmentId, ThreadId, type ProjectReadFileResult } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -63,6 +64,7 @@ vi.mock(import("./projectFilesQueryState"), async (original) => ({
     refresh: vi.fn(),
   }),
   getOptimisticProjectFileQueryData: () => state.optimistic,
+  getProjectFileContents: () => state.optimistic?.contents ?? state.file?.contents,
   getUnsavedProjectFileQueryData: () => null,
   setProjectFileQueryData: (
     _environmentId: EnvironmentId,
@@ -144,10 +146,16 @@ describe("rendered Markdown task saves", () => {
     expect(state.writeFile).not.toHaveBeenCalled();
   });
 
-  it("still toggles and saves tasks from a complete read", async () => {
+  it.each([
+    { name: "rendered editor", contents: "- [ ] Keep the rest of this file\n" },
+    {
+      name: "footnote preview",
+      contents: "- [ ] Keep the rest of this file[^note]\n\n[^note]: Note\n",
+    },
+  ])("still toggles and saves tasks from a complete read: $name", async ({ contents }) => {
     using _settings = setup();
-    await using screen = await render(markdownPreview(false));
-    await expect.element(screen.getByRole("textbox", { name: "Edit Markdown" })).toBeVisible();
+    await using screen = await render(markdownPreview(false, contents));
+    await expect.element(screen.getByRole("checkbox")).toBeVisible();
     using _timers = fakeTimers();
     const checkbox = screen.container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(checkbox).not.toBeNull();
@@ -159,7 +167,7 @@ describe("rendered Markdown task saves", () => {
       input: {
         cwd: "/workspace",
         relativePath: "tasks.md",
-        contents: "- [x] Keep the rest of this file\n",
+        contents: contents.replace("[ ]", "[x]"),
       },
     });
   });
@@ -170,9 +178,12 @@ describe("rendered Markdown task saves", () => {
       "# Title\n\nA **bold** paragraph.\n\n| Name | Value |\n| --- | --- |\n| a | 1 |\n\n<!-- keep -->\n";
     await using screen = await render(markdownPreview(false, contents));
     await expect.element(screen.getByRole("textbox", { name: "Edit Markdown" })).toBeVisible();
-    const heading = screen.getByRole("heading", { name: "Title" });
-    await heading.fill("Updated");
-    await expect.element(screen.getByRole("heading", { name: "Updated" })).toBeVisible();
+    const view = EditorView.findFromDOM(
+      screen.container.querySelector<HTMLElement>(".cm-editor")!,
+    )!;
+    await screen.getByRole("heading", { name: "Title" }).click();
+    view.dispatch({ selection: { anchor: 2, head: 7 } });
+    await userEvent.keyboard("Updated");
     expect(screen.container.querySelector("strong")?.textContent).toBe("bold");
     await vi.waitFor(() =>
       expect(state.writeFile).toHaveBeenLastCalledWith({
@@ -187,17 +198,19 @@ describe("rendered Markdown task saves", () => {
     await userEvent.keyboard(
       isMacPlatform(navigator.platform) ? "{Meta>}z{/Meta}" : "{Control>}z{/Control}",
     );
-    await expect.element(screen.getByRole("heading", { name: "Title" })).toBeVisible();
-    await screen.getByRole("cell", { name: "1", exact: true }).fill("Updated cell");
-    await userEvent.keyboard("{Enter}");
-    await userEvent.keyboard("Second paragraph");
+    expect(view.state.sliceDoc()).toBe(contents);
+    await screen.getByRole("cell", { name: "1", exact: true }).click();
+    const cell = contents.indexOf("1 |");
+    view.dispatch({ selection: { anchor: cell, head: cell + 1 } });
+    await userEvent.keyboard("Updated cell");
     await vi.waitFor(() =>
-      expect(state.optimistic?.contents).toContain("Updated cell<br><br>Second paragraph"),
+      expect(state.optimistic?.contents).toBe(contents.replace("1 |", "Updated cell |")),
     );
     const saved = state.optimistic!.contents;
     await screen.rerender(markdownPreview(false, saved));
-    await expect.element(screen.getByRole("heading", { name: "Title" })).toBeVisible();
+    expect(view.state.sliceDoc()).toBe(saved);
     await screen.rerender(markdownPreview(false, "# External change\n"));
-    await expect.element(screen.getByRole("heading", { name: "External change" })).toBeVisible();
+    await expect.element(screen.getByRole("heading", { name: /External change/ })).toBeVisible();
+    expect(view.state.sliceDoc()).toBe("# External change\n");
   });
 });

@@ -26,6 +26,7 @@ import {
   clearProjectFileQueryData,
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
+  getProjectFileEditOrigin,
   getUnsavedProjectFileQueryData,
   resolveProjectFileQueryData,
   setProjectFileQueryData,
@@ -155,8 +156,29 @@ describe("project files queries", () => {
       byteLength: 20,
       truncated: false,
     } satisfies ProjectReadFileResult;
-    setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"220"}');
-    setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}');
+    const olderOrigin = {};
+    const latestOrigin = {};
+    setProjectFileQueryData(
+      environmentId,
+      "/repo",
+      "convex.json",
+      '{"nodeVersion":"220"}',
+      olderOrigin,
+    );
+    const olderSnapshot = getOptimisticProjectFileQueryData(environmentId, "/repo", "convex.json")!;
+    setProjectFileQueryData(
+      environmentId,
+      "/repo",
+      "convex.json",
+      '{"nodeVersion":"22"}',
+      latestOrigin,
+    );
+    expect(getProjectFileEditOrigin(olderSnapshot)).toBe(olderOrigin);
+    expect(
+      getProjectFileEditOrigin(
+        getOptimisticProjectFileQueryData(environmentId, "/repo", "convex.json")!,
+      ),
+    ).toBe(latestOrigin);
 
     expect(getOptimisticProjectFileQueryData(environmentId, "/repo", "convex.json")?.contents).toBe(
       '{"nodeVersion":"22"}',
