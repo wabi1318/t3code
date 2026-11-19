@@ -106,6 +106,51 @@ it.effect("excludes ready checkpoints from rolled-back runs", () => {
   }).pipe(Effect.provide(layer));
 });
 
+it.effect("uses the destination folder's baseline for a thread that switched projects", () => {
+  const projection = makeProjection();
+  const diffCheckpoints = vi.fn((_input: CheckpointStore.DiffCheckpointsInput) =>
+    Effect.succeed("diff --git a/file b/file"),
+  );
+  const layer = layerFor({
+    projection: Effect.succeed({
+      ...projection,
+      checkpointScopes: [
+        { id: firstScopeId, runId: firstRunId, kind: "root_run", cwd: "/original" },
+        { id: secondScopeId, runId: secondRunId, kind: "root_run", cwd: "/destination" },
+      ],
+      checkpoints: [
+        {
+          ...projection.checkpoints[0]!,
+          scopeId: firstScopeId,
+          runId: firstRunId,
+          appRunOrdinal: 1,
+          ref: CheckpointRef.make("refs/t3/test/original"),
+        },
+        ...projection.checkpoints,
+      ],
+    }),
+    diffCheckpoints,
+  });
+  return Effect.gen(function* () {
+    const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+    yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
+    const baseline = yield* checkpointRefForScopeOrdinal({
+      scopeId: secondScopeId,
+      ordinalWithinScope: 0,
+    });
+    assert.include(diffCheckpoints.mock.calls[0]?.[0], {
+      cwd: "/destination",
+      fromCheckpointRef: baseline,
+      toCheckpointRef: secondRef,
+    });
+    const acrossFolders = yield* query
+      .getTurnDiff({ threadId, fromTurnCount: 1, toTurnCount: 2 })
+      .pipe(Effect.flip);
+    assert.instanceOf(acrossFolders, CheckpointRefUnavailableError);
+    assert.lengthOf(diffCheckpoints.mock.calls, 1);
+  }).pipe(Effect.provide(layer));
+});
+
 function makeProjectionAfterStoppedRun(stoppedRunCheckpoint: boolean) {
   const thirdRunId = RunId.make("run:checkpoint-diff-v2:3");
   const checkpoint = (

@@ -177,7 +177,9 @@ export const make = Effect.gen(function* () {
 
       const firstScope =
         input.fromTurnCount === 0
-          ? projection.checkpointScopes.find((scope) => scope.kind === "root_run")
+          ? projection.checkpointScopes.find(
+              (scope) => scope.kind === "root_run" && scope.cwd === toScope.cwd,
+            )
           : undefined;
       const fromCheckpointRef =
         input.fromTurnCount === 0
@@ -190,7 +192,11 @@ export const make = Effect.gen(function* () {
           : (
               parentCheckpoint ??
               readyCheckpoints.find(
-                (checkpoint) => checkpoint.appRunOrdinal === input.fromTurnCount,
+                (checkpoint) =>
+                  checkpoint.appRunOrdinal === input.fromTurnCount &&
+                  projection.checkpointScopes.some(
+                    (scope) => scope.id === checkpoint.scopeId && scope.cwd === toScope.cwd,
+                  ),
               )
             )?.ref;
       if (fromCheckpointRef === undefined) {

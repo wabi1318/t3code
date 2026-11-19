@@ -1,4 +1,5 @@
 import * as Dialog from "../../components/ui/Dialog";
+import { useAtomValue } from "@effect/atom-react";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
   THREAD_LIST_V2_MONO_FONT as MONO_FONT,
@@ -26,6 +27,7 @@ import {
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
@@ -47,6 +49,7 @@ import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { copyThreadReference } from "../../lib/copyThreadReference";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useEnvironmentScope } from "../../state/session";
+import { serverEnvironment } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
   pendingDraftBranchNeedsRefs,
@@ -768,6 +771,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
   const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const navigation = useNavigation();
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
     [onRegenerateThreadTitle, thread],
@@ -891,6 +895,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [props.autoSettleOptOutSupported, thread.autoSettleDisabledAt],
   );
   const canTurnIntoProject = canTurnThreadIntoProject(thread);
+  const config = useAtomValue(serverEnvironment.configValueAtom(thread.environmentId));
+  const canSwitchWorkspace =
+    canOperateThread &&
+    thread.archivedAt == null &&
+    !thread.lineage.sideChat &&
+    config?.environment.capabilities.threadWorkspaceSwitch === true;
+  const canArchive = threadCanArchive(thread.runtime);
   const titleMenuItems = useMemo<MenuAction[]>(
     () => [
       { id: "rename", title: "Rename", image: "square.and.pencil" },
@@ -898,18 +909,34 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         supported: props.titleRegenerationSupported,
         isRegenerating: isRegeneratingTitle,
       }),
+      ...(canSwitchWorkspace
+        ? [
+            {
+              id: "switch-working-folder",
+              title: "Switch working folder",
+              image: "folder",
+              attributes: { disabled: !canArchive },
+            } satisfies MenuAction,
+          ]
+        : []),
       ...(canTurnIntoProject
         ? [
             {
               id: "turn-into-project",
               title: "Turn into project",
               image: "folder.badge.plus",
-              attributes: { disabled: !threadCanArchive(thread.runtime) },
+              attributes: { disabled: !canArchive },
             } satisfies MenuAction,
           ]
         : []),
     ],
-    [canTurnIntoProject, props.titleRegenerationSupported, thread.runtime, isRegeneratingTitle],
+    [
+      canSwitchWorkspace,
+      canArchive,
+      canTurnIntoProject,
+      props.titleRegenerationSupported,
+      isRegeneratingTitle,
+    ],
   );
   const snoozableCardMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -988,6 +1015,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "turn-into-project") void turnThreadIntoProject(thread);
+      if (nativeEvent.event === "switch-working-folder") {
+        navigation.dispatch(
+          StackActions.push("AddProjectLocal", {
+            environmentId: thread.environmentId,
+            workspaceSwitch: { threadId: thread.id, sourceProjectId: thread.projectId },
+          }),
+        );
+      }
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(
           { environmentId: thread.environmentId, threadId: thread.id },
@@ -1021,6 +1056,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       }
     },
     [
+      navigation,
       onNewThreadOnBranch,
       thread,
       handleArchive,

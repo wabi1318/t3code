@@ -58,6 +58,17 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Switch a thread's working folder
+
+Choose **Switch working folder** from the thread's menu. Select a project on the
+thread's machine, or browse to an existing folder. T3 Code adds an unregistered
+folder as a project. Finish the current turn and clear any queued messages before
+switching.
+
+The conversation continues in the same thread. The next turn and scheduled tasks
+attached to the thread run in the selected folder after you confirm. Files and
+uncommitted changes stay in their current folders.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.
@@ -300,7 +311,7 @@ You can also choose **Side chat** from the **+** menu in the right panel. The si
 chat opens as a tab there, with its own composer. Side chats do not show in the
 sidebar. Find one again under **Side chats** in thread details.
 
-A side chat works in the same folder as the thread and starts with Full access.
+A side chat starts in its parent thread's working folder with Full access.
 You can change its permission mode in its composer before sending a message.
 
 To use what you learned, choose **Bring back**. The thread gets the side chat with

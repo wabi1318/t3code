@@ -546,6 +546,15 @@ export const ProjectCreateFromThreadResult = Schema.Struct({
 });
 export type ProjectCreateFromThreadResult = typeof ProjectCreateFromThreadResult.Type;
 
+export const ThreadWorkspaceSwitchInput = Schema.Struct({
+  commandId: CommandId,
+  threadId: ThreadId,
+  sourceProjectId: ProjectId,
+  workspaceRoot: TrimmedNonEmptyString,
+  moveScheduledTasks: Schema.Literal(true),
+});
+export type ThreadWorkspaceSwitchInput = typeof ThreadWorkspaceSwitchInput.Type;
+
 export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileError>()(
   "ProjectWriteFileError",
   {

@@ -58,6 +58,7 @@ import {
   ProjectId,
   resolveEnvironmentMachineKind,
   SourceControlProviderKind,
+  type ThreadId,
 } from "@t3tools/contracts";
 import {
   StackActions,
@@ -73,6 +74,7 @@ import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Order from "effect/Order";
 import { AsyncResult } from "effect/reactivity";
+import { useAtomValue } from "@effect/atom-react";
 import { cn } from "../../lib/cn";
 import { useProjects, useServerConfigs, waitForProject } from "../../state/entities";
 import { filesystemEnvironment } from "../../state/filesystem";
@@ -1275,13 +1277,30 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
   );
 }
 
-export function AddProjectLocalFolderScreen(props: { readonly environmentId?: string | string[] }) {
+export function AddProjectLocalFolderScreen(props: {
+  readonly environmentId?: string | string[];
+  readonly workspaceSwitch?: { readonly threadId: ThreadId; readonly sourceProjectId: ProjectId };
+}) {
   const environment = useEnvironmentFromParam(props.environmentId);
+  const navigation = useNavigation();
+  const projects = useProjects();
   const canCreateProject = useEnvironmentScope(
     environment?.environmentId ?? null,
     AuthOrchestrationOperateScope,
   );
+  const requestedEnvironmentId = stringParam(props.environmentId);
+  const canSwitchWorkspace = useAtomValue(
+    projectEnvironment.switchThreadWorkspace.permissionAtom(
+      props.workspaceSwitch && environment?.environmentId === requestedEnvironmentId && environment
+        ? environment.environmentId
+        : null,
+    ),
+  );
+  const canSubmit = props.workspaceSwitch ? canSwitchWorkspace : canCreateProject;
   const createProject = useCreateProject(environment);
+  const switchWorkspace = useAtomCommand(projectEnvironment.switchThreadWorkspace, {
+    reportFailure: false,
+  });
   const { isBrowseNavigating, navigateToBrowsePath, pathInput, setPathInput } =
     useBrowsePathInput(environment);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1300,6 +1319,38 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
       return;
     }
 
+    if (props.workspaceSwitch) {
+      const { threadId, sourceProjectId } = props.workspaceSwitch;
+      const environmentId = environment.environmentId;
+      if (!canSwitchWorkspace || environmentId !== requestedEnvironmentId) return;
+      Dialog.confirm({
+        title: "Switch working folder?",
+        message: `The next turn and any scheduled tasks attached to this thread will run in ${resolved.path}. Your conversation stays here and files stay in their current folders.`,
+        confirmText: "Switch folder",
+        onConfirm: () => {
+          setIsSubmitting(true);
+          void switchWorkspace({
+            environmentId,
+            input: {
+              commandId: CommandId.make(uuidv4()),
+              threadId,
+              sourceProjectId,
+              workspaceRoot: resolved.path,
+              moveScheduledTasks: true,
+            },
+          }).then((result) => {
+            setIsSubmitting(false);
+            if (AsyncResult.isFailure(result)) {
+              setError(errorMessage(Cause.squash(result.cause)));
+            } else if (AsyncResult.isSuccess(result)) {
+              navigation.goBack();
+            }
+          });
+        },
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     const result = await createProject(resolved.path);
     if (result && AsyncResult.isFailure(result)) {
@@ -1309,20 +1360,50 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
   };
 
   return (
-    <AddProjectShell title="Local folder">
+    <AddProjectShell title={props.workspaceSwitch ? "Switch working folder" : "Local folder"}>
       {error ? <ErrorBanner message={error} /> : null}
       {environment ? (
         <>
-          {!canCreateProject ? (
-            <ErrorBanner message="This connection cannot add projects." />
+          {!canSubmit ? (
+            <ErrorBanner
+              message={
+                props.workspaceSwitch
+                  ? "This connection cannot switch working folders."
+                  : "This connection cannot add projects."
+              }
+            />
           ) : null}
           <ProjectPathInput value={pathInput} onChangeText={setPathInput} onSubmit={submitPath} />
           <PrimaryActionButton
-            label="Add project"
-            disabled={!canCreateProject || isBrowseNavigating || isSubmitting}
+            label={props.workspaceSwitch ? "Review switch" : "Add project"}
+            disabled={!canSubmit || isBrowseNavigating || isSubmitting}
             onPress={submitPath}
             loading={isSubmitting}
           />
+          {props.workspaceSwitch ? (
+            <View className="gap-2">
+              <SectionTitle>Projects on this machine</SectionTitle>
+              {projects
+                .filter(
+                  (project) =>
+                    project.environmentId === environment.environmentId &&
+                    !project.isScratch &&
+                    project.archivedAt == null,
+                )
+                .map((project) => (
+                  <Pressable
+                    key={project.id}
+                    accessibilityRole="button"
+                    disabled={isSubmitting}
+                    className="rounded-lg bg-grouped-card px-3 py-2"
+                    onPress={() => setPathInput(project.workspaceRoot)}
+                  >
+                    <Text>{project.title}</Text>
+                    <Text className="text-xs text-foreground-muted">{project.workspaceRoot}</Text>
+                  </Pressable>
+                ))}
+            </View>
+          ) : null}
           <FolderBrowser
             environment={environment}
             navigateToBrowsePath={navigateToBrowsePath}
