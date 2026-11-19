@@ -6,7 +6,12 @@ import * as NodeModule from "node:module";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import { workspaceDetailRouter } from "../workspace/workspace-detail-selection";
 import type { NavigationState } from "@react-navigation/native";
-import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { act, createElement, isValidElement, type ReactNode } from "react";
@@ -23,6 +28,7 @@ const state = vi.hoisted(() => ({
     title: string;
     workspaceRoot: string;
   }[],
+  switchSourceWorktree: null as string | null,
   createResult: null as Promise<unknown> | null,
   createNewResult: null as Promise<unknown> | null,
   startCloneResult: null as Promise<unknown> | null,
@@ -31,6 +37,8 @@ const state = vi.hoisted(() => ({
   waitForProject: vi.fn(),
   dispatch: vi.fn(),
   alert: vi.fn(),
+  goBack: vi.fn(),
+  switchWorkspace: vi.fn(),
   navigationState: undefined as NavigationState | undefined,
   environments: [{ environmentId: "environment", environmentLabel: "Environment" }],
 }));
@@ -72,6 +80,7 @@ vi.mock("react-native", () => ({
 vi.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
     dispatch: state.dispatch,
+    goBack: state.goBack,
     getState: () =>
       state.navigationState ?? {
         index: 4,
@@ -106,6 +115,7 @@ vi.mock("../../state/session", () => ({
 }));
 vi.mock("../../state/entities", () => ({
   useProjects: () => state.existingProjects,
+  useThreadShell: () => ({ worktreePath: state.switchSourceWorktree }),
   waitForProject: state.waitForProject,
   useServerConfigs: () =>
     new Map([
@@ -134,6 +144,7 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
   }),
 }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
+vi.mock("@effect/atom-react", () => ({ useAtomValue: (value: unknown) => value }));
 vi.mock("../../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => () => {} }));
 vi.mock("../../state/query", () => ({ useEnvironmentQuery: () => ({ data: null }) }));
 vi.mock("../../state/presentation", () => ({
@@ -152,6 +163,10 @@ vi.mock("../../state/sourceControl", () => ({
 }));
 vi.mock("../../state/projects", () => ({
   projectEnvironment: {
+    switchThreadWorkspace: Object.assign(state.switchWorkspace, {
+      permissionAtom: (environmentId: string | null) =>
+        environmentId !== null && state.scopes.has(AuthOrchestrationOperateScope),
+    }),
     createNew: () => state.createNewResult,
     create: ({ input }: { input: { workspaceRoot: string } }) => {
       if (!state.scopes.has(AuthOrchestrationOperateScope)) {
@@ -206,6 +221,12 @@ function findAction(
     return node.props.disabled && !includeDisabled ? null : (node.props.onPress ?? null);
   }
   return findAction(node.props.children, label, includeDisabled);
+}
+
+function includesText(node: ReactNode, text: string): boolean {
+  if (Array.isArray(node)) return node.some((child) => includesText(child, text));
+  if (node === text) return true;
+  return isValidElement<{ children?: ReactNode }>(node) && includesText(node.props.children, text);
 }
 
 const mountedRoots: ReturnType<typeof createRoot>[] = [];
@@ -488,6 +509,86 @@ describe("add project source environment", () => {
 });
 
 describe("local project navigation", () => {
+  it.each([
+    { worktreePath: null, showsSource: false },
+    { worktreePath: "/work/source-worktree", showsSource: true },
+  ])(
+    "shows the source project only when it changes the working folder ($showsSource)",
+    ({ worktreePath, showsSource }) => {
+      const existingProjects = state.existingProjects;
+      state.switchSourceWorktree = worktreePath;
+      state.existingProjects = [
+        {
+          environmentId: "environment",
+          id: "source",
+          title: "Source project",
+          workspaceRoot: "/work/source",
+        },
+        {
+          environmentId: "environment",
+          id: "destination",
+          title: "Other project",
+          workspaceRoot: "/work/other",
+        },
+      ];
+      try {
+        const screen = renderScreen(() =>
+          AddProjectLocalFolderScreen({
+            environmentId: "environment",
+            workspaceSwitch: {
+              threadId: ThreadId.make("thread"),
+              sourceProjectId: ProjectId.make("source"),
+            },
+          }),
+        );
+        expect(includesText(screen, "Source project")).toBe(showsSource);
+        expect(includesText(screen, "Other project")).toBe(true);
+      } finally {
+        state.switchSourceWorktree = null;
+        state.existingProjects = existingProjects;
+      }
+    },
+  );
+
+  it("waits for confirmation before moving the thread and its scheduled tasks", async () => {
+    state.scopes = new Set([AuthOrchestrationOperateScope]);
+    state.baseDirectory = "/work/other-project";
+    state.alert.mockReset();
+    state.switchWorkspace.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+    state.goBack.mockReset();
+    const threadId = ThreadId.make("thread");
+    const sourceProjectId = ProjectId.make("source-project");
+    const review = findAction(
+      renderScreen(() =>
+        AddProjectLocalFolderScreen({
+          environmentId: ["environment"],
+          workspaceSwitch: { threadId, sourceProjectId },
+        }),
+      ),
+      "Review switch",
+    );
+
+    await review?.();
+    expect(state.switchWorkspace).not.toHaveBeenCalled();
+    const [title, message, buttons] = state.alert.mock.lastCall ?? [];
+    expect(title).toBe("Switch working folder?");
+    expect(message).toContain("scheduled tasks");
+    expect(buttons).toContainEqual(expect.objectContaining({ text: "Cancel", style: "cancel" }));
+    const confirm = buttons?.find((button: { text: string }) => button.text === "Switch folder");
+    await act(() => confirm?.onPress());
+    expect(state.switchWorkspace).toHaveBeenCalledExactlyOnceWith({
+      environmentId: "environment",
+      input: {
+        commandId: "project",
+        threadId,
+        sourceProjectId,
+        workspaceRoot: "/work/other-project",
+        moveScheduledTasks: true,
+      },
+    });
+    expect(state.goBack).toHaveBeenCalledOnce();
+  });
+
   function setup() {
     state.navigationState = undefined;
     state.scopes = new Set([AuthOrchestrationOperateScope]);

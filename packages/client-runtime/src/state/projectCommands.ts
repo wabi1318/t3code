@@ -207,6 +207,12 @@ export function createProjectEnvironmentAtoms<R, E>(
       scheduler: projectScheduler,
       concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
     }),
+    switchThreadWorkspace: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:switch-thread-workspace",
+      tag: WS_METHODS.projectsSwitchThreadWorkspace,
+      scheduler: projectScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
     writeFile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:write-file",
       tag: WS_METHODS.projectsWriteFile,

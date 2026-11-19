@@ -187,6 +187,8 @@ function makeHarness(options: HarnessOptions = {}) {
       bootstrap: () => Effect.die("unused"),
       update: () => Effect.die("unused"),
       delete: () => Effect.die("unused"),
+      withProjectLock: (_projectId, effect) => effect,
+      withWorkspaceLock: (workspaceRoot, effect) => effect(workspaceRoot),
       listPage: () => Effect.die("unused"),
       getById: (id) =>
         Effect.succeed(

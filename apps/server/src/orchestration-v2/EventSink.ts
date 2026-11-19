@@ -27,6 +27,7 @@ import { replayAndBufferProjectedLiveEvents } from "./LiveStreamBudget.ts";
 import type { UnsequencedProjectEvent } from "../persistence/OrchestrationEventStore.ts";
 import { projectDomainEventForWire } from "./WireProjection.ts";
 import { makeRunOutcomeRecorder, type RunOutcome } from "./RunMetrics.ts";
+import { moveThreadTasks } from "../scheduledTasks/ThreadBindings.ts";
 
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -142,6 +143,8 @@ export interface EventSinkV2Shape {
     readonly acceptedAt: DateTime.Utc;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
     readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
+    readonly moveScheduledTasksToProject?: ProjectId;
+    readonly projectRegistration?: UnsequencedProjectEvent;
     readonly cancelUnsettledEffects?: {
       readonly effectTypes: ReadonlyArray<EffectOutbox.OrchestrationEffectRequestV2["type"]>;
       readonly reason: string;
@@ -651,6 +654,13 @@ const layerBase: Layer.Layer<
             return { ...existing, committed: false as const, cancelledEffectIds: [] };
           }
 
+          // Registration shares the switch receipt so a replay cannot create a second project.
+          const projectEvent =
+            input.projectRegistration === undefined
+              ? undefined
+              : yield* eventStore.appendProjectEvent(input.projectRegistration);
+          if (projectEvent !== undefined) yield* projectStore.apply(projectEvent);
+
           const runId = input.updateDelegatedCompletionOnlyRunId;
           const normalized = yield* normalizeEvents(
             runId === undefined
@@ -673,6 +683,12 @@ const layerBase: Layer.Layer<
             );
           }
           const outcomes = yield* applyStoredEvents(storedEvents);
+          if (input.moveScheduledTasksToProject !== undefined) {
+            yield* moveThreadTasks({
+              threadIds: [input.threadId],
+              projectId: input.moveScheduledTasksToProject,
+            }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+          }
           yield* effectOutbox.enqueue(input.effects);
           const receipt: CommandReceiptStore.CommandReceiptV2 = {
             commandId: input.commandId,
@@ -691,7 +707,14 @@ const layerBase: Layer.Layer<
                   threadId: input.threadId,
                   ...input.cancelUnsettledEffects,
                 });
-          return { receipt, storedEvents, outcomes, committed: true as const, cancelledEffectIds };
+          return {
+            receipt,
+            storedEvents,
+            outcomes,
+            projectEvent,
+            committed: true as const,
+            cancelledEffectIds,
+          };
         }),
         (result) =>
           Effect.gen(function* () {
@@ -699,7 +722,12 @@ const layerBase: Layer.Layer<
             if (result.committed && input.effects.length > 0) {
               yield* effectOutbox.notifyAvailable(input.effects.length);
             }
-            if (result.committed) yield* publishStoredEvents(result.storedEvents, result.outcomes);
+            if (result.committed) {
+              if (result.projectEvent !== undefined) {
+                yield* eventStore.publishCommitted([result.projectEvent]);
+              }
+              yield* publishStoredEvents(result.storedEvents, result.outcomes);
+            }
           }),
       );
       return {

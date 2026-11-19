@@ -47,6 +47,10 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { canTurnThreadIntoProject, useThreadActions } from "./useThreadActions";
+import {
+  canSwitchThreadWorkspace,
+  openThreadWorkspaceDialog,
+} from "../components/ThreadWorkspaceDialog";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -149,6 +153,7 @@ export function useThreadActionMenu(input: {
         snoozePresets,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+        canSwitchWorkingFolder: canSwitchThreadWorkspace(threadRef),
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -275,6 +280,9 @@ export function useThreadActionMenu(input: {
           }
           return;
         }
+        case "switch-working-folder":
+          openThreadWorkspaceDialog(threadRef);
+          return;
         case "copy-path": {
           const workspacePath = thread.worktreePath ?? projectCwd;
           if (!workspacePath) {

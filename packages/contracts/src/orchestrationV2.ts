@@ -3407,6 +3407,15 @@ const OrchestrationV2InternalCommand = Schema.Union([
     projectId: ProjectId,
   }),
   Schema.Struct({
+    type: Schema.Literal("thread.project.switch"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    sourceProjectId: ProjectId,
+    projectId: ProjectId,
+    workspaceRoot: TrimmedNonEmptyString,
+    newProjectTitle: Schema.optionalKey(TrimmedNonEmptyString),
+  }),
+  Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,
     threadId: ThreadId,
