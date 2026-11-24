@@ -4,6 +4,7 @@ import { msg } from "gt-react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { m } from "~/i18n/messages";
+import { openBrowserFind } from "../browser/browserFind";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -186,7 +187,17 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "preview.zoomIn": zoomCommand("zoom-in"),
       "preview.zoomOut": zoomCommand("zoom-out"),
       "preview.resetZoom": zoomCommand("reset-zoom"),
-      "preview.find": previewCommand("find"),
+      "preview.find": (event) => {
+        const target = document.activeElement?.closest<HTMLElement>("[data-browser-find-tab]");
+        const tabId = target?.dataset.browserFindTab;
+        if (tabId) {
+          claim(event);
+          openBrowserFind(tabId);
+          return;
+        }
+        if (!isBrowserSurfaceFocused()) return false;
+        previewCommand("find")(event);
+      },
     },
     {
       when: () =>
