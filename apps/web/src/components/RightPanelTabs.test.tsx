@@ -172,15 +172,15 @@ describe("pull request tab snapshots", () => {
 describe("panel tab navigation", () => {
   it("moves across every panel surface and wraps in both directions", () => {
     const surfaces = [
-      { kind: "side-chat", id: "side-chat:a", threadId: ThreadId.make("a") },
+      { kind: "thread", id: "thread:a", threadId: ThreadId.make("a") },
       { kind: "diff", id: "diff" },
-      { kind: "side-chat", id: "side-chat:b", threadId: ThreadId.make("b") },
+      { kind: "thread", id: "thread:b", threadId: ThreadId.make("b") },
     ] as const;
-    expect(adjacentPanelSurface(surfaces, "side-chat:a", 1)).toBe(surfaces[1]);
-    expect(adjacentPanelSurface(surfaces, "side-chat:a", -1)).toBe(surfaces[2]);
-    expect(adjacentPanelSurface(surfaces, "side-chat:b", 1)).toBe(surfaces[0]);
-    expect(adjacentPanelSurface(surfaces, "side-chat:b", -1)).toBe(surfaces[1]);
+    expect(adjacentPanelSurface(surfaces, "thread:a", 1)).toBe(surfaces[1]);
+    expect(adjacentPanelSurface(surfaces, "thread:a", -1)).toBe(surfaces[2]);
+    expect(adjacentPanelSurface(surfaces, "thread:b", 1)).toBe(surfaces[0]);
+    expect(adjacentPanelSurface(surfaces, "thread:b", -1)).toBe(surfaces[1]);
     expect(adjacentPanelSurface(surfaces, "diff", 1)).toBe(surfaces[2]);
-    expect(adjacentPanelSurface(surfaces.slice(0, 1), "side-chat:a", 1)).toBeUndefined();
+    expect(adjacentPanelSurface(surfaces.slice(0, 1), "thread:a", 1)).toBeUndefined();
   });
 });

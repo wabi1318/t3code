@@ -11,11 +11,18 @@ import { resolveOfficialAcpRegistryIconUrl } from "@t3tools/contracts";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { AppText as Text } from "./ui/AppText";
 import { cn } from "../lib/cn";
-import { getProviderClient } from "@t3tools/client-runtime/provider-clients";
+import {
+  deepseekIcon,
+  getProviderClient,
+  openRouterIcon,
+  resolveProviderIconKind,
+} from "@t3tools/client-runtime/provider-clients";
 
 type ProviderIconProps = {
   readonly provider: string | null | undefined;
   readonly iconUrl?: string | null | undefined;
+  readonly brandIcon?: "deepseek" | undefined;
+  readonly model?: string | undefined;
   readonly size?: number;
 };
 
@@ -74,8 +81,13 @@ export function ProviderIcon(props: ProviderIconProps) {
   const gradientId = useId();
   const size = props.size ?? 16;
   const mono = isDarkMode ? "#e5e5e5" : "#171717";
+  const iconKind = resolveProviderIconKind({
+    driverKind: props.provider,
+    brandIcon: props.brandIcon,
+    model: props.model,
+  });
 
-  if (props.provider?.trim().toLowerCase() === "antigravity") {
+  if (iconKind?.trim().toLowerCase() === "antigravity") {
     return (
       <Image
         source={require("../../assets/antigravity.png")}
@@ -84,11 +96,11 @@ export function ProviderIcon(props: ProviderIconProps) {
       />
     );
   }
-  if (props.provider === "acpRegistry") {
+  if (iconKind === "acpRegistry") {
     return <AcpRegistryProviderIcon color={mono} iconUrl={props.iconUrl} size={size} />;
   }
 
-  if (props.provider === "claudeAgent") {
+  if (iconKind === "claudeAgent") {
     return (
       <Svg width={size} height={size} viewBox="0 0 256 257" fill="none">
         <Path
@@ -99,7 +111,12 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
 
-  const packageIcon = getProviderClient(props.provider)?.icon;
+  const packageIcon =
+    iconKind === "deepseek"
+      ? deepseekIcon
+      : iconKind === "openrouter"
+        ? openRouterIcon
+        : getProviderClient(iconKind)?.icon;
   if (packageIcon) {
     const themeFill = (fill: { readonly light: string; readonly dark: string }) =>
       isDarkMode ? fill.dark : fill.light;
@@ -152,8 +169,24 @@ export function ProviderIcon(props: ProviderIconProps) {
   );
 }
 
+/** Local ACP agents share one fallback glyph, so a badge alone cannot tell instances apart. */
+export function providerInstanceNameLabel(props: {
+  readonly provider: string | null | undefined;
+  readonly iconUrl?: string | null | undefined;
+  readonly displayName: string;
+  readonly showBadge: boolean;
+}): string | null {
+  return props.showBadge &&
+    props.provider === "acpRegistry" &&
+    resolveOfficialAcpRegistryIconUrl(props.iconUrl) === null
+    ? props.displayName
+    : null;
+}
+
 export function ProviderInstanceIcon(props: {
   readonly iconUrl?: string | null;
+  readonly brandIcon?: "deepseek" | undefined;
+  readonly model?: string | undefined;
   readonly provider: string | null | undefined;
   readonly size?: number;
   readonly displayName: string;
@@ -165,7 +198,13 @@ export function ProviderInstanceIcon(props: {
   return (
     <View style={{ position: "relative" }}>
       <View style={{ opacity: 0.6 }}>
-        <ProviderIcon iconUrl={props.iconUrl} provider={props.provider} size={props.size} />
+        <ProviderIcon
+          iconUrl={props.iconUrl}
+          brandIcon={props.brandIcon}
+          model={props.model}
+          provider={props.provider}
+          size={props.size}
+        />
       </View>
       {props.showBadge ? (
         // An absolute badge alone is capped at icon width and clips initials.
