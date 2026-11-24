@@ -7,26 +7,21 @@ count as product use.
 
 ## Installs and owners
 
-`distinct_id` keeps the rule every build has used: the hashed Codex workspace,
-else the Claude machine id, else the install's anonymous id. It can change when
-someone logs in, and a Codex Team shares one, but keeping it means PostHog charts
-and history never break. Do not change it; add a field instead.
+`distinct_id` is the install's anonymous id. The server does not read Codex or Claude
+credential files to choose it.
 
 Every event also carries `installId` when the server can save its state: the hash
 of a random id in the state directory, which never changes for the install. If
-that file cannot be written, events still go out under `distinct_id`, as before. Count installs
+that file cannot be written, `distinctId` is null and events are not sent. Count installs
 with it. Who an install belongs to is a separate fact, sent as
 `install.owner_observed`. Owners are resolved at query time in our own store, so
 a rule can change and apply to all history.
 
-[Owner sources](../../apps/server/src/telemetry/Identify.ts), strongest first:
-T3 Connect, then the OpenAI and Claude person ids, then the client device. The
-server reports what it can read itself: the linked Connect account and provider
-logins. A connecting client reports its signed-in Connect account and its device,
-which links every environment opened from one phone, browser, or desktop. Use the
-OpenAI `user_id` claim, not the Codex `account_id` (the ChatGPT workspace, which a
-whole Team shares) or the token `sub` (one per login method). Two Connect accounts are never the same person, whatever
-weaker ids they share.
+[Owner sources](../../apps/server/src/telemetry/Identify.ts): the server reports the
+linked T3 Connect account. It does not read provider credential files, and clients
+do not send owner or device hashes. A ChatGPT sign-in completed in T3 can still
+record that OpenAI user id when telemetry is on. Use the OpenAI `user_id` claim,
+not the Codex `account_id` or the token `sub`.
 
 Every id is SHA-256 hashed with [one helper](../../packages/shared/src/telemetryId.ts)
 on both sides, so a Connect account hashes the same on the client and the server.
@@ -134,9 +129,9 @@ repeating the call's outcome and duration, so event counts are not call counts.
 
 ## Delivery
 
-The server sends batches to the ingest endpoint at `ingest.t3.codes`, which archives
-every event and forwards some of them to PostHog. A send can fail after the endpoint
-has stored the batch, so every retry is a copy.
+The server sends batches only when `T3CODE_TELEMETRY_ENABLED=true` and both
+`T3CODE_POSTHOG_KEY` and `T3CODE_POSTHOG_HOST` are set. There is no default key or host.
+A send can fail after the endpoint has stored the batch, so every retry is a copy.
 [Delivery](../../apps/server/src/telemetry/AnalyticsService.ts) gives each event a
 uuid when it is recorded (the endpoint rejects events without one), backs off after
 a failed send, and drops a batch after a few tries. Without these limits, one stuck
@@ -149,6 +144,7 @@ send prompts, authentication material, raw provider payloads, user-assigned devi
 names, or conversation identifiers. Client metadata is best effort; invalid values
 must not reject a connection. PostHog person profiles remain disabled.
 
-Dev-runner servers and the CI archive smoke test turn telemetry off, which also
-stops relay tracing, because each would count as a new install. Set
-`T3CODE_TELEMETRY_ENABLED=true` to test analytics or relay tracing from a dev server.
+Telemetry and relay tracing stay off unless `T3CODE_TELEMETRY_ENABLED=true`. Dev-runner
+servers set that to false when it is unset. Set it to true, plus `T3CODE_POSTHOG_KEY` and
+`T3CODE_POSTHOG_HOST`, to test analytics from a dev server. Relay traces also need a
+configured trace URL, dataset, and token.
