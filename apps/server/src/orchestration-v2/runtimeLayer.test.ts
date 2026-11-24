@@ -39,6 +39,7 @@ import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -82,6 +83,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ScratchThreadPromotion from "../project/ScratchThreadPromotion.ts";
+import * as ThreadWorkspaceSwitch from "../project/ThreadWorkspaceSwitch.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -355,7 +357,7 @@ const layerProjectDeletionTest = Layer.mergeAll(
   RuntimeLayer.layerEventSink,
   ThreadCommandExecutor.layer,
 ).pipe(
-  Layer.provide(
+  Layer.provideMerge(
     Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
       peek: () =>
         Effect.succeed({
@@ -7173,6 +7175,215 @@ it.layer(layerScratchPromotionTest)("turning a No project thread into a project"
       assert.equal(
         error.message,
         "Only a No project thread with its own folder can become a project.",
+      );
+    }),
+  );
+});
+
+const layerSwitchWorkspaceScratch = Layer.unwrap(
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const scratchRoot = yield* fs.makeTempDirectoryScoped();
+    return Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/work/switch-workspace/projects",
+      scratchRoot: Effect.succeedSome(scratchRoot),
+    });
+  }),
+).pipe(Layer.provide(NodeServices.layer));
+
+it.layer(
+  ThreadWorkspaceSwitch.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerSwitchWorkspaceScratch),
+    ),
+    Layer.provideMerge(layerProjectDeletionTest),
+  ),
+)("switching a thread's working folder", (it) => {
+  it.effect("preserves the conversation and runs its bound schedule in the new folder", () =>
+    Effect.gen(function* () {
+      const workspace = yield* ThreadWorkspaceSwitch.ThreadWorkspaceSwitch;
+      const projects = yield* ProjectService.ProjectService;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const tasks = yield* ScheduledTaskService.ScheduledTaskService;
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+      const scratchRoot = Option.getOrThrow(yield* managedFolders.scratchRoot);
+      const aliasParent = yield* fs.makeTempDirectoryScoped();
+      const scratchAlias = path.join(aliasParent, "scratch-alias");
+      yield* fs.symlink(scratchRoot, scratchAlias);
+      const threadId = ThreadId.make("switch-workspace-thread");
+      const sourceProjectId = ProjectId.make("switch-workspace-source");
+      const sourceFolder = "/work/switch-workspace/source";
+      const targetFolder = path.join(scratchRoot, "individual-folder");
+      yield* fs.makeDirectory(targetFolder);
+      yield* projects.create({
+        commandId: CommandId.make("switch-workspace-create-project"),
+        projectId: sourceProjectId,
+        title: "Original project",
+        workspaceRoot: sourceFolder,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("switch-workspace-create-thread"),
+        threadId,
+        projectId: sourceProjectId,
+        title: "An ongoing conversation",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: "original-branch",
+        worktreePath: sourceFolder + "-worktree",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const messageId = MessageId.make("switch-workspace-original-message");
+      yield* projects.create({
+        commandId: CommandId.make("switch-workspace-scratch-project"),
+        projectId: ProjectId.make("switch-workspace-scratch"),
+        title: "No project",
+        workspaceRoot: scratchRoot,
+      });
+      for (const [index, workspaceRoot] of [scratchAlias, scratchRoot].entries()) {
+        const sharedScratch = yield* workspace
+          .switchWorkspace({
+            commandId: CommandId.make(`switch-workspace-into-shared-scratch:${index}`),
+            threadId,
+            sourceProjectId,
+            workspaceRoot,
+            moveScheduledTasks: true,
+          })
+          .pipe(Effect.flip);
+        assert.include(sharedScratch.message, "shared scratch folder");
+      }
+      assert.equal(
+        (yield* orchestrator.getThreadProjection(threadId)).thread.projectId,
+        sourceProjectId,
+      );
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("switch-workspace-original-message"),
+        threadId,
+        messageId,
+        text: "Remember this request.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const input = {
+        commandId: CommandId.make("switch-workspace-confirmed"),
+        threadId,
+        sourceProjectId,
+        workspaceRoot: targetFolder,
+        moveScheduledTasks: true,
+      } as const;
+      const busy = yield* workspace
+        .switchWorkspace({
+          ...input,
+          commandId: CommandId.make("switch-workspace-still-busy"),
+        })
+        .pipe(Effect.flip);
+      assert.include(busy.message, "before switching folders");
+      assert.isTrue(Option.isNone(yield* projects.getByWorkspaceRoot(targetFolder)));
+
+      const before = yield* orchestrator.getThreadProjection(threadId);
+      const originalRun = before.runs[0]!;
+      const now = yield* DateTime.now;
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("switch-workspace-first-run-completed"),
+            type: "run.updated",
+            threadId,
+            runId: originalRun.id,
+            occurredAt: now,
+            payload: { ...originalRun, status: "completed", completedAt: now },
+          },
+          {
+            id: EventId.make("switch-workspace-pending-restore"),
+            type: "thread.metadata-updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...before.thread, rollbackRequestId: CommandId.make("pending-restore") },
+          },
+        ],
+      });
+      const restoring = yield* workspace
+        .switchWorkspace({
+          ...input,
+          commandId: CommandId.make("switch-workspace-still-restoring"),
+        })
+        .pipe(Effect.flip);
+      assert.isTrue(Option.isNone(yield* projects.getByWorkspaceRoot(targetFolder)));
+      assert.include(restoring.message, "before switching folders");
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("switch-workspace-restore-ended"),
+            type: "thread.metadata-updated",
+            threadId,
+            occurredAt: now,
+            payload: before.thread,
+          },
+        ],
+      });
+      const taskId = ScheduledTaskId.make("switch-workspace-bound-task");
+      const originalTask = {
+        id: taskId,
+        title: "Continue the work",
+        prompt: "Continue the work",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 60_000 },
+        projectId: sourceProjectId,
+        threadId,
+        workspaceStrategy: { type: "root" },
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdBy: "user",
+        creationSource: "web",
+      } as const;
+      yield* tasks.upsert(originalTask);
+
+      const { projectId } = yield* workspace.switchWorkspace(input);
+      assert.deepEqual(yield* workspace.switchWorkspace(input), { projectId });
+      assert.equal(
+        Option.getOrUndefined(yield* projects.getById(projectId))?.workspaceRoot,
+        targetFolder,
+      );
+      const moved = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(moved.thread.projectId, projectId);
+      assert.equal(moved.thread.activeProviderThreadId, before.thread.activeProviderThreadId);
+      assert.isNull(moved.thread.branch);
+      assert.isNull(moved.thread.worktreePath);
+      assert.isTrue(moved.messages.some((message) => message.id === messageId));
+      assert.equal(moved.checkpointScopes[0]?.cwd, sourceFolder + "-worktree");
+      const scheduled = (yield* tasks.list()).tasks.find((task) => task.id === taskId)!;
+      assert.equal(scheduled.projectId, projectId);
+      assert.equal(scheduled.threadId, threadId);
+      const staleEdit = yield* tasks.upsert({ ...originalTask, title: "Updated schedule" });
+      assert.equal(staleEdit.task.projectId, projectId);
+      yield* threads.sendToThread({
+        projectId: scheduled.projectId,
+        threadId,
+        commandId: CommandId.make("switch-workspace-schedule-run"),
+        messageId: MessageId.make("switch-workspace-schedule-run"),
+        scheduledTaskId: scheduled.id,
+        text: scheduled.prompt,
+        attachments: [],
+        mode: "queue",
+        createdBy: scheduled.createdBy,
+        creationSource: scheduled.creationSource,
+      });
+      const after = yield* orchestrator.getThreadProjection(threadId);
+      const nextRun = after.runs.find((run) => run.id !== originalRun.id);
+      const nextNode = after.nodes.find((node) => node.id === nextRun?.rootNodeId);
+      assert.equal(
+        after.checkpointScopes.find((scope) => scope.id === nextNode?.checkpointScopeId)?.cwd,
+        targetFolder,
       );
     }),
   );

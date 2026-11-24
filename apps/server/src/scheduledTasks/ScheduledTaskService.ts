@@ -55,6 +55,7 @@ import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as DueHint from "../scheduling/DueHint.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { isMissedFixedTimeRun, isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
+import * as ThreadBindings from "./ThreadBindings.ts";
 import {
   redactHeaders,
   redactQuery,
@@ -237,6 +238,7 @@ export class ScheduledTaskService extends Context.Service<
   {
     readonly list: () => Effect.Effect<ScheduledTaskListResult, ScheduledTaskError>;
     readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;
+    readonly notifyThreadMoved: Effect.Effect<void>;
     readonly upsert: (
       input: ScheduledTaskUpsertInput,
     ) => Effect.Effect<ScheduledTaskMutationResult, ScheduledTaskError>;
@@ -586,8 +588,22 @@ export const layer = Layer.effect(
       return task;
     });
 
+    const readBoundProjectId = Effect.fn("ScheduledTaskService.readBoundProjectId")(function* (
+      threadId: ThreadId | null,
+    ) {
+      if (threadId === null) return undefined;
+      const [thread] = yield* sql<{ project_id: ProjectId }>`
+        SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}
+      `.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError((cause) => taskError("Could not read the thread's project.", { cause })),
+      );
+      return thread?.project_id;
+    });
+
     // Run transitions own run-state columns; settings saves must not overwrite them.
     // Check existence in the write so edits cannot undo concurrent deletion.
+    // Reject a project changed after validation so a stale save cannot undo a workspace switch.
     const saveTask = (
       task: ScheduledTask,
       requireExisting: boolean,
@@ -647,8 +663,12 @@ export const layer = Layer.effect(
           ${task.runCount},
           ${webhook.token},
           ${webhook.secret}
-        WHERE ${requireExisting ? 0 : 1} = 1
-           OR EXISTS (SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id})
+        WHERE (${requireExisting ? 0 : 1} = 1
+           OR EXISTS (SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id}))
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_threads
+            WHERE thread_id = ${task.threadId} AND project_id != ${task.projectId}
+          )
         ON CONFLICT (task_id)
         DO UPDATE SET
           title = excluded.title,
@@ -693,7 +713,16 @@ export const layer = Layer.effect(
         Effect.flatMap((rows) =>
           rows.length > 0
             ? Effect.void
-            : taskError("Schedule task not found.", { taskId: task.id }),
+            : readBoundProjectId(task.threadId).pipe(
+                Effect.flatMap((projectId) =>
+                  taskError(
+                    projectId !== undefined && projectId !== task.projectId
+                      ? "The thread's project changed. Reload the schedule task and try again."
+                      : "Schedule task not found.",
+                    { taskId: task.id },
+                  ),
+                ),
+              ),
         ),
       );
 
@@ -1235,6 +1264,8 @@ export const layer = Layer.effect(
       // keep their run history, and so real load failures propagate instead
       // of silently resetting an existing row.
       const existingTask = yield* findTask(id);
+      const threadId = input.threadId ?? null;
+      const projectId = (yield* readBoundProjectId(threadId)) ?? input.projectId;
       // Keep the existing next_run_at when the schedule itself is untouched:
       // editing a title or prompt must not postpone (or resurrect) a due
       // run — only schedule/enabled changes restart the clock.
@@ -1283,7 +1314,7 @@ export const layer = Layer.effect(
                 signature?.secretRef === undefined
                   ? undefined
                   : yield* secretRequests
-                      .consume({ ref: signature.secretRef, projectId: input.projectId })
+                      .consume({ ref: signature.secretRef, projectId })
                       .pipe(
                         Effect.catch((error) =>
                           replay
@@ -1307,7 +1338,7 @@ export const layer = Layer.effect(
           : { token: null, secret: null, secretChanged: true };
       const workspaceStrategy: ScheduledTask["workspaceStrategy"] =
         input.workspaceStrategy.type === "worktree" &&
-        (yield* managedFolders.isScratchProject(input.projectId))
+        (yield* managedFolders.isScratchProject(projectId))
           ? { type: "root" }
           : input.workspaceStrategy;
       const scheduleUnchanged =
@@ -1322,8 +1353,8 @@ export const layer = Layer.effect(
         prompt: input.prompt,
         enabled: input.enabled,
         schedule,
-        projectId: input.projectId,
-        threadId: input.threadId ?? null,
+        projectId,
+        threadId,
         workspaceStrategy,
         modelSelection: input.modelSelection,
         runtimeMode: input.runtimeMode,
@@ -1469,12 +1500,8 @@ export const layer = Layer.effect(
     const moveThreadTasks: ScheduledTaskService["Service"]["moveThreadTasks"] = Effect.fn(
       "ScheduledTaskService.moveThreadTasks",
     )(function* (input) {
-      if (input.threadIds.length === 0) return;
-      const moved = yield* sql<{ task_id: ScheduledTaskId }>`
-        UPDATE scheduled_tasks SET project_id = ${input.projectId}
-        WHERE project_id != ${input.projectId} AND thread_id IN ${sql.in(input.threadIds)}
-        RETURNING task_id
-      `.pipe(
+      const moved = yield* ThreadBindings.moveThreadTasks(input).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
         Effect.mapError((cause) =>
           taskError("Could not move the thread's schedule tasks.", { cause }),
         ),
@@ -2409,6 +2436,7 @@ export const layer = Layer.effect(
     return ScheduledTaskService.of({
       list,
       subscribeList,
+      notifyThreadMoved: notifyChanged,
       upsert,
       setEnabled,
       delete: deleteTask,

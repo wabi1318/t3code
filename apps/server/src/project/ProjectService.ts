@@ -123,6 +123,14 @@ export class ProjectService extends Context.Service<
     >;
     readonly update: (input: ProjectUpdateInput) => Effect.Effect<Project, ProjectServiceError>;
     readonly delete: (input: ProjectDeleteInput) => Effect.Effect<Project, ProjectServiceError>;
+    readonly withProjectLock: <A, E, R>(
+      projectId: ProjectId,
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>;
+    readonly withWorkspaceLock: <A, E, R>(
+      workspaceRoot: string,
+      effect: (workspaceRoot: string) => Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | ProjectOperationError, R>;
     readonly getById: (
       projectId: ProjectId,
       options?: { readonly includeDeleted?: boolean },
@@ -224,7 +232,10 @@ export const make = Effect.gen(function* () {
         ),
       );
 
-  const commit = Effect.fn("ProjectService.commit")(function* (command: ProjectCommand) {
+  const commit = Effect.fn("ProjectService.commit")(function* (
+    command: ProjectCommand,
+    projectLockHeld = false,
+  ) {
     const { projectId } = command;
     const dispatchError = (cause: unknown) =>
       new ProjectOperationError({ operation: "dispatch-project-command", projectId, cause });
@@ -267,14 +278,13 @@ export const make = Effect.gen(function* () {
         error: encodeProjectCommandRejection(planned.failure),
       });
     });
-    const receipt = yield* projectLocks
-      .withLock(
-        projectId,
-        workspaceRoot === undefined
-          ? planAndCommit
-          : workspaceLocks.withLock(workspaceRoot, planAndCommit),
-      )
-      .pipe(Effect.mapError(dispatchError));
+    const write =
+      workspaceRoot === undefined
+        ? planAndCommit
+        : workspaceLocks.withLock(workspaceRoot, planAndCommit);
+    const receipt = yield* (projectLockHeld ? write : projectLocks.withLock(projectId, write)).pipe(
+      Effect.mapError(dispatchError),
+    );
     if (receipt.projectId !== projectId || receipt.commandType !== command.type) {
       return yield* dispatchError(
         `Command ${command.commandId} was already used by ${receipt.commandType} for ${receipt.projectId}.`,
@@ -309,6 +319,16 @@ export const make = Effect.gen(function* () {
       });
     }
     return yield* hydrate(row.value);
+  });
+
+  const withWorkspaceLock: ProjectService["Service"]["withWorkspaceLock"] = Effect.fn(
+    "ProjectService.withWorkspaceLock",
+  )(function* <A, E, R>(
+    workspaceRoot: string,
+    effect: (workspaceRoot: string) => Effect.Effect<A, E, R>,
+  ) {
+    const normalized = yield* normalizeWorkspaceRoot({ workspaceRoot });
+    return yield* workspaceLocks.withLock(normalized, effect(normalized));
   });
 
   const getById: ProjectService["Service"]["getById"] = Effect.fn("ProjectService.getById")(
@@ -512,13 +532,14 @@ export const make = Effect.gen(function* () {
       if (isFirstDelete) {
         yield* deleteChildThreads(input);
       }
-      yield* commit({ type: "project.delete", commandId: input.commandId, projectId });
+      yield* commit({ type: "project.delete", commandId: input.commandId, projectId }, true);
       if (isFirstDelete) {
         yield* clearProjectSettingsOverrides(projectId);
       }
       yield* projectEnrichment.invalidate([existing.value.workspaceRoot]);
       return yield* readCommitted(projectId);
     },
+    (effect, input) => projectLocks.withLock(input.projectId, effect),
   );
 
   const enrichShell = (shell: OrchestrationProjectShell) =>
@@ -596,6 +617,8 @@ export const make = Effect.gen(function* () {
     bootstrap,
     update,
     delete: deleteProject,
+    withProjectLock: projectLocks.withLock,
+    withWorkspaceLock,
     getById,
     getByWorkspaceRoot,
     snapshot,
