@@ -26,8 +26,11 @@ import {
 } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
+import { msg, T } from "gt-react";
+
+import { m } from "~/i18n/messages";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
-import { setMarkdownTaskChecked } from "./filePreviewMode";
+import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskEdits";
 import { observeResize } from "~/lib/observeResize";
 import {
   fileMarkdownSource,
@@ -153,7 +156,7 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
     <>
       {footnotes ? (
         <div className="border-b py-2 text-xs text-muted-foreground">
-          Click the text to edit the Markdown source for this file with footnotes.
+          <T>Click the text to edit the Markdown source for this file with footnotes.</T>
         </div>
       ) : null}
       <FileMarkdownPreview
@@ -269,7 +272,7 @@ class MarkdownBulletWidget extends WidgetType {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = this.checked;
-      checkbox.setAttribute("aria-label", "Toggle task");
+      checkbox.setAttribute("aria-label", m(msg("Toggle task")));
       checkbox.addEventListener("change", () =>
         toggleMarkdownTask(view, this.markerOffset, checkbox.checked),
       );
@@ -581,7 +584,7 @@ function createMarkdownState(
       })),
       EditorView.contentAttributes.of({
         role: "textbox",
-        "aria-label": "Edit Markdown",
+        "aria-label": m(msg("Edit Markdown")),
         "aria-multiline": "true",
         spellcheck: "false",
       }),

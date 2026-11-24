@@ -65,8 +65,6 @@ class ContextMenuImageCopyError extends Schema.TaggedError<ContextMenuImageCopyE
     return "Could not copy the context-menu image.";
   }
 }
-  }
-}
 // Match --workspace-topbar-height in apps/web/src/index.css; native macOS buttons stay 14 points at any zoom.
 const MACOS_WORKSPACE_TOPBAR_HEIGHT = 52;
 const MACOS_WINDOW_BUTTON_RADIUS = 7;
@@ -718,11 +716,6 @@ export const make = Effect.gen(function* () {
                     ),
                   ),
                 );
-              },
-            },
-            { type: "separator" },
-          );
-        }
               },
             },
             { type: "separator" },

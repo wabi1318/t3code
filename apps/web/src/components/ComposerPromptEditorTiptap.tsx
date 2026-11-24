@@ -16,7 +16,9 @@ import {
 import { ReactNodeViewRenderer, NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { Paragraph } from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
-import { useGT } from "gt-react";
+import { msg, useGT } from "gt-react";
+
+import { m } from "~/i18n/messages";
 import { newlineInCode, splitBlockKeepMarks } from "@tiptap/pm/commands";
 import { isHistoryTransaction } from "@tiptap/pm/history";
 import {
@@ -2009,7 +2011,7 @@ function ComposerPromptEditorTiptapInner(
                   </>
                 )}
                 {!disabled && prediction ? (
-                  <span className="sr-only"> Press Tab to accept this suggestion.</span>
+                  <span className="sr-only"> {m(msg("Press Tab to accept this suggestion."))}</span>
                 ) : null}
               </div>
             ) : null}

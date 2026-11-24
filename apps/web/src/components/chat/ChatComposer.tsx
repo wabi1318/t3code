@@ -396,6 +396,7 @@ export interface ChatComposerProps {
   isSendBusy: boolean;
   canResume: boolean;
   isRevertingCheckpoint?: boolean;
+  isCompacting?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
   canSteer: boolean;
@@ -545,6 +546,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isSendBusy,
     canResume,
     isRevertingCheckpoint = false,
+    isCompacting = false,
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
     canSteer,
@@ -970,7 +972,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentUnavailable === null &&
       pendingUserInputs.length === 0 &&
       pendingApprovals.length === 0 &&
-      !showPlanFollowUpPrompt &&
       editingQueuedAttachments === null &&
       composerImages.length === 0 &&
       composerFiles.length === 0 &&

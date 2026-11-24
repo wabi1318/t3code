@@ -100,6 +100,7 @@ const makeHarness = (
         generateBranchName: unused,
         generateThreadTitle: unused,
         generateReviewGuide: unused,
+        generateTranscriptionPostProcessing: unused,
         generateComposerPrediction: (input) =>
           Effect.suspend(() => {
             calls.push(input);
@@ -146,10 +147,12 @@ const makeHarness = (
                     workspaceRoot: "/workspace/project",
                     defaultModelSelection: null,
                     defaultThreadEnvMode: null,
+                    hasCustomTitle: false,
                     autoPull: false,
                     faviconPath: null,
                     projectIcon: null,
                     scripts: [],
+                    trackedFolders: [],
                     pinnedAt: null,
                     archivedAt: null,
                     deletedAt: null,
