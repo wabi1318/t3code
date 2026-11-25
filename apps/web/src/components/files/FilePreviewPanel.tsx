@@ -1183,6 +1183,7 @@ function selectRenderedContentOnSelectAll(event: ReactKeyboardEvent<HTMLElement>
     !event.altKey;
   // React bubbles keys from portaled children (the image dialog) through this surface.
   if (
+    event.defaultPrevented ||
     !selectAll ||
     !(event.target instanceof Node) ||
     !event.currentTarget.contains(event.target)

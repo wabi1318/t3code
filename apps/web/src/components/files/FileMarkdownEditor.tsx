@@ -20,6 +20,7 @@ import {
   Decoration,
   EditorView,
   keymap,
+  runScopeHandlers,
   ViewPlugin,
   WidgetType,
   type ViewUpdate,
@@ -263,6 +264,14 @@ class MarkdownBulletWidget extends WidgetType {
       this.checked === other.checked &&
       this.markerOffset === other.markerOffset
     );
+  }
+  // チェック状態だけの変更で要素を差し替えると、次のキー入力の送り先を失う。
+  override updateDOM(element: HTMLElement, _view: EditorView, previous: this) {
+    if (this.label !== previous.label || this.markerOffset !== previous.markerOffset) return false;
+    const checkbox = element.querySelector("input");
+    if (!checkbox || this.checked === null) return false;
+    checkbox.checked = this.checked;
+    return true;
   }
   toDOM(view: EditorView) {
     const element = document.createElement("span");
@@ -627,8 +636,21 @@ export default function FileMarkdownEditor({
   useLayoutEffect(() => {
     const view = mountEditor(parent.current!);
     editor.current = view;
+    // チェック欄などにある全選択の入力も、原文の選択範囲へ反映する。
+    const selectAllMarkdown = (event: KeyboardEvent) => {
+      if (
+        !event.defaultPrevented &&
+        event.key.toLowerCase() === "a" &&
+        runScopeHandlers(view, event, "editor")
+      ) {
+        event.preventDefault();
+        view.focus();
+      }
+    };
+    view.dom.addEventListener("keydown", selectAllMarkdown);
     return () => {
       editor.current = null;
+      view.dom.removeEventListener("keydown", selectAllMarkdown);
       view.destroy();
     };
   }, []);

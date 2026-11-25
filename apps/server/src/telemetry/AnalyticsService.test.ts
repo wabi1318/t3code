@@ -202,30 +202,34 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AnalyticsService
     }),
   );
 
-  it.effect("waits for desktop shell consent and honors a late telemetry opt-out", () =>
-    Effect.gen(function* () {
-      const env: NodeJS.ProcessEnv = { T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1" };
-      const batches = yield* sendFor(
-        0,
-        respondWithStatus(204),
-        Effect.gen(function* () {
-          const analytics = yield* AnalyticsService.AnalyticsService;
-          yield* analytics.record("test.before-discovery");
-          yield* analytics.flush;
-          env.T3CODE_TELEMETRY_ENABLED = "false";
-          delete env.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING;
-          yield* analytics.record("test.opted-out");
-          yield* analytics.flush;
-          env.T3CODE_TELEMETRY_ENABLED = "true";
-          yield* analytics.record("test.allowed");
-          yield* analytics.flush;
-        }),
-      ).pipe(Effect.provideService(HostProcess.Environment, env));
-      assert.deepEqual(
-        batches.flat().map((event) => event.event),
-        ["test.allowed"],
-      );
-    }),
+  it.effect.each([true, false, undefined])(
+    "waits for desktop shell consent with an initial preference of %s",
+    (initialPreference) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = { T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1" };
+        const batches = yield* sendFor(
+          0,
+          respondWithStatus(204),
+          Effect.gen(function* () {
+            const analytics = yield* AnalyticsService.AnalyticsService;
+            yield* analytics.record("test.before-discovery");
+            yield* analytics.flush;
+            env.T3CODE_TELEMETRY_ENABLED = "false";
+            delete env.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING;
+            yield* analytics.record("test.opted-out");
+            yield* analytics.flush;
+            env.T3CODE_TELEMETRY_ENABLED = "true";
+            yield* analytics.record("test.allowed");
+            yield* analytics.flush;
+          }),
+          undefined,
+          { T3CODE_TELEMETRY_ENABLED: initialPreference },
+        ).pipe(Effect.provideService(HostProcess.Environment, env));
+        assert.deepEqual(
+          batches.flat().map((event) => event.event),
+          ["test.allowed"],
+        );
+      }),
   );
 
   it.effect("client owner reports cannot use up the server's owner cap", () =>

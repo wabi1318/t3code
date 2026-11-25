@@ -69,16 +69,7 @@ describe("BrowserFindBar", () => {
     await expect.element(screen.getByRole("button", { name: "Next match" })).toBeDisabled();
   });
 
-  it("keeps native find requests in their tab and clears a search on navigation or removal", async () => {
-    const listeners = new Set<(action: string, previewTabId?: string) => void>();
-    using stack = new DisposableStack();
-    vi.stubGlobal("desktopBridge", {
-      onMenuAction: (listener: (action: string, previewTabId?: string) => void) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    });
-    stack.defer(() => vi.unstubAllGlobals());
+  it("keeps find requests in their tab and clears a search on navigation or removal", async () => {
     const first = createWebview();
     const second = createWebview();
     await using screen = await render(
@@ -87,9 +78,7 @@ describe("BrowserFindBar", () => {
         <BrowserFindBar tabId="tab-b" webviewRef={second.ref} />
       </>,
     );
-    await act(() => {
-      for (const listener of listeners) listener("preview.find", "tab-b");
-    });
+    await act(() => openBrowserFind("tab-b"));
     const input = screen.getByRole("searchbox", { name: "Find in page" });
     await input.fill("日本語");
     expect(first.findInPage).not.toHaveBeenCalled();
@@ -117,6 +106,5 @@ describe("BrowserFindBar", () => {
     await expect.element(screen.getByRole("button", { name: "Next match" })).toBeDisabled();
     await screen.unmount();
     expect(first.stopFindInPage).toHaveBeenCalledWith("clearSelection");
-    expect(listeners.size).toBe(0);
   });
 });

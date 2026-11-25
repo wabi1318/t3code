@@ -72,7 +72,8 @@ export function requestConfirmDialog(
     const pending = {
       message,
       variant: options?.variant ?? "default",
-      initialFocus: options?.initialFocus ?? "cancel",
+      initialFocus:
+        options?.variant === "destructive" ? "cancel" : (options?.initialFocus ?? "cancel"),
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {

@@ -104,8 +104,8 @@ export const installRelayTelemetryEnabled = Effect.fn("desktop.ipc.window.instal
           shellEnvironment.discoveryFinished.pipe(
             Effect.map((known) => {
               if (!policyAllows) return false;
-              // Unset stays undecided until the login shell is read, so a profile opt-in is seen.
-              if (!known && env.T3CODE_TELEMETRY_ENABLED === undefined) return null;
+              // Cached preferences do not establish consent from the current login shell.
+              if (!known) return null;
               return isRelayTracingEnabled(env);
             }),
           ),

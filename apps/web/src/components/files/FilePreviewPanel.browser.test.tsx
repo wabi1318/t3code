@@ -751,8 +751,11 @@ describe("rendered Markdown select all", () => {
 
     await userEvent.click(screen.getByText("Rendered file body."));
     await expectFileOnlySelection();
+    // Collapse the source selection so the task marker is rendered as a checkbox again.
+    await userEvent.keyboard("{ArrowRight}");
     // A toggled checkbox keeps focus on an input inside the preview.
     await userEvent.click(screen.getByRole("checkbox"));
+    await expect.element(screen.getByRole("checkbox")).toHaveFocus();
     await expectFileOnlySelection();
   });
 });

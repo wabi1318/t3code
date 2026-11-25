@@ -73,6 +73,20 @@ describe("confirm dialog coordinator", () => {
     expect(requestConfirmDialog("Continue?")).toBeUndefined();
   });
 
+  it.each(["cancel", "confirm"] as const)(
+    "keeps destructive confirmation focus on Cancel when %s is requested",
+    async (initialFocus) => {
+      using stack = new DisposableStack();
+      stack.defer(mountHost());
+      const confirmation = requireConfirmation(
+        requestConfirmDialog("Delete the project?", { variant: "destructive", initialFocus }),
+      );
+      expect(readConfirmDialogState()).toMatchObject({ initialFocus: "cancel" });
+      respondToConfirmDialog(false);
+      await expect(confirmation).resolves.toBe(false);
+    },
+  );
+
   it("ignores responses after the active dialog has been closed", () => {
     const unregister = mountHost();
     const confirmation = requireConfirmation(requestConfirmDialog("Continue?"));

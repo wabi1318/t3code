@@ -13,10 +13,13 @@ import {
 } from "./fileMarkdownDocument";
 
 it("reveals only the selected paragraph and keeps original syntax as source", () => {
-  const source =
-    "# Title\n\nFirst **bold**\n\n- [ ] Second _italic_\n- ![badge](x.png)\n\n| A | B |\n|---|---|\n| 1 | 2 |\n";
+  const beyondInitialViewport = "Paragraph\n\n".repeat(400);
+  const source = `# Title\n\nFirst **bold**\n\n- [ ] Second _italic_\n- ![badge](x.png)\n${beyondInitialViewport}| A | B |\n|---|---|\n| 1 | 2 |\n`;
   const document = parseFileMarkdown(source);
-  const state = EditorState.create({ doc: source, extensions: fileMarkdownLanguage() });
+  let state = EditorState.create({ doc: source, extensions: fileMarkdownLanguage() });
+  // 編集画面を持たない単体テストでは、表示結果の検査前に全文の解析を完了させる。
+  expect(ensureSyntaxTree(state, state.doc.length, Infinity)).not.toBeNull();
+  state = state.update({}).state;
   const inactive = presentFileMarkdown(state, document.definitions, []);
   expect(inactive.filter((item) => item.kind === "preview")).toHaveLength(2);
   const caret = source.indexOf("bold");

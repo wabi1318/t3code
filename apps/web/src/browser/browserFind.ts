@@ -9,11 +9,7 @@ export function subscribeBrowserFind(tabId: string, open: () => void): () => voi
     if ((event as CustomEvent<unknown>).detail === tabId) open();
   };
   window.addEventListener(BROWSER_FIND_EVENT, listener);
-  const unsubscribe = window.desktopBridge?.onMenuAction((action, previewTabId) => {
-    if (action === "preview.find" && previewTabId === tabId) open();
-  });
   return () => {
     window.removeEventListener(BROWSER_FIND_EVENT, listener);
-    unsubscribe?.();
   };
 }

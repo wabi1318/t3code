@@ -8,6 +8,7 @@ import * as previewActions from "../components/preview/previewActionBus";
 import * as settings from "../hooks/useSettings";
 import * as storage from "../hooks/useLocalStorage";
 import * as threadActions from "../lib/chatThreadActions";
+import * as previewFocus from "../lib/previewFocus";
 import * as entities from "../state/entities";
 import * as projectsState from "../state/projects";
 import * as session from "../state/session";
@@ -92,6 +93,9 @@ describe("preview commands", () => {
       );
     using stack = new DisposableStack();
     stack.defer(() => useComposerDraftStore.getState().clearDraftThread(draftId));
+    vi.stubGlobal("document", { activeElement: null });
+    stack.defer(() => vi.unstubAllGlobals());
+    using focused = vi.spyOn(previewFocus, "isBrowserSurfaceFocused").mockReturnValue(true);
     using _scope = vi.spyOn(session, "readEnvironmentScope").mockReturnValue(true);
     using dispatch = vi.spyOn(previewActions, "dispatchPreviewAction").mockImplementation(() => {});
     using register = vi.spyOn(dispatcher, "registerCommands").mockReturnValue(() => {});
@@ -104,5 +108,11 @@ describe("preview commands", () => {
     register.mock.calls[0]![0][command]!(event);
 
     expect(dispatch).toHaveBeenCalledWith(action);
+    if (command === "preview.find") {
+      dispatch.mockClear();
+      focused.mockReturnValue(false);
+      expect(register.mock.calls[0]![0][command]!(event)).toBe(false);
+      expect(dispatch).not.toHaveBeenCalled();
+    }
   });
 });

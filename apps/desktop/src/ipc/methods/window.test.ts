@@ -275,12 +275,22 @@ describe("installRelayTelemetryEnabled", () => {
       return { beforeDiscovery, afterDiscovery: ask() };
     }).pipe(Effect.scoped);
 
-  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+  it.effect("waits for the current shell preference before returning the renderer policy", () =>
     Effect.gen(function* () {
       assert.deepEqual(yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: "false" }), {
-        beforeDiscovery: false,
+        beforeDiscovery: null,
         afterDiscovery: false,
       });
+      for (const preference of ["true", "false", undefined]) {
+        for (const cached of ["true", "false"]) {
+          assert.deepEqual(
+            yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: cached }, undefined, {
+              T3CODE_TELEMETRY_ENABLED: preference,
+            }),
+            { beforeDiscovery: null, afterDiscovery: preference === "true" },
+          );
+        }
+      }
       // Unset stays off. The renderer asks again until the login shell is read, in case it opts in.
       assert.deepEqual(yield* relayTelemetryEnabled({}), {
         beforeDiscovery: null,
