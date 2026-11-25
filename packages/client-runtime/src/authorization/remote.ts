@@ -9,12 +9,10 @@ import {
   type AuthWebSocketTicketUse,
 } from "@t3tools/contracts";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
-import { hashTelemetryId } from "@t3tools/shared/telemetryId";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
-import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
@@ -26,6 +24,7 @@ export { RemoteEnvironmentAuthUndeclaredStatusError } from "../rpc/http.ts";
 export type RemoteEnvironmentAuthError = RemoteEnvironmentRequestError;
 
 const DEFAULT_REMOTE_REQUEST_TIMEOUT_MS = 10_000;
+const isUndeclaredStatusError = Schema.is(RemoteEnvironmentAuthUndeclaredStatusError);
 
 const clientMetadataTokenExchangeFields = (
   clientMetadata: AuthClientPresentationMetadata | undefined,
@@ -46,19 +45,8 @@ export interface ClientOwnerParams {
   readonly device?: string;
 }
 
-/**
- * Tells the environment, for analytics, which T3 Connect account and device
- * are connecting, so it can count the environment as theirs.
- */
-export const readClientOwnerParams = Effect.gen(function* () {
-  const session = yield* Effect.serviceOption(ClientCapabilities.CloudSession);
-  const account = Option.isSome(session) ? yield* session.value.identity : Option.none();
-  const device = yield* (yield* ClientCapabilities.AnalyticsDevice).id;
-  return {
-    ...(Option.isSome(account) ? { connect: hashTelemetryId(account.value.accountId) } : {}),
-    ...(Option.isSome(device) ? { device: hashTelemetryId(device.value) } : {}),
-  } satisfies ClientOwnerParams;
-});
+/** Owner and device hashes are not sent. Connection does not depend on them. */
+export const readClientOwnerParams = Effect.succeed({} satisfies ClientOwnerParams);
 
 export const appendClientConnectionParams = (
   url: URL,
@@ -116,6 +104,8 @@ export const exchangeRemoteDpopAccessToken = Effect.fn(
 )(function* (input: {
   readonly httpBaseUrl: string;
   readonly credential: string;
+  /** An access token renews its own session on hosts that advertise `accessTokenRenewal`. */
+  readonly credentialType?: typeof AuthEnvironmentBootstrapTokenType | typeof AuthAccessTokenType;
   readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
   readonly clientMetadata?: AuthClientPresentationMetadata;
   readonly dpopProof: string;
@@ -130,7 +120,7 @@ export const exchangeRemoteDpopAccessToken = Effect.fn(
       payload: {
         grant_type: AuthTokenExchangeGrantType,
         subject_token: input.credential,
-        subject_token_type: AuthEnvironmentBootstrapTokenType,
+        subject_token_type: input.credentialType ?? AuthEnvironmentBootstrapTokenType,
         requested_token_type: AuthAccessTokenType,
         ...(input.scopes ? { scope: encodeOAuthScope(input.scopes) } : {}),
         ...clientMetadataTokenExchangeFields(input.clientMetadata),
@@ -205,8 +195,7 @@ const issueWebSocketTicketWithFallback = <E, R>(
     ? issue(use)
     : issue(use).pipe(
         Effect.catchIf(
-          (error) =>
-            error instanceof RemoteEnvironmentAuthUndeclaredStatusError && error.status === 404,
+          (error) => isUndeclaredStatusError(error) && error.status === 404,
           () => issue(undefined),
         ),
       );

@@ -20,14 +20,18 @@ import {
   Decoration,
   EditorView,
   keymap,
+  runScopeHandlers,
   ViewPlugin,
   WidgetType,
   type ViewUpdate,
 } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
+import { msg, T } from "gt-react";
+
+import { m } from "~/i18n/messages";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
-import { setMarkdownTaskChecked } from "./filePreviewMode";
+import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskEdits";
 import { observeResize } from "~/lib/observeResize";
 import {
   fileMarkdownSource,
@@ -153,7 +157,7 @@ const MarkdownPreviewBlock = memo(function MarkdownPreviewBlock({
     <>
       {footnotes ? (
         <div className="border-b py-2 text-xs text-muted-foreground">
-          Click the text to edit the Markdown source for this file with footnotes.
+          <T>Click the text to edit the Markdown source for this file with footnotes.</T>
         </div>
       ) : null}
       <FileMarkdownPreview
@@ -261,6 +265,14 @@ class MarkdownBulletWidget extends WidgetType {
       this.markerOffset === other.markerOffset
     );
   }
+  // チェック状態だけの変更で要素を差し替えると、次のキー入力の送り先を失う。
+  override updateDOM(element: HTMLElement, _view: EditorView, previous: this) {
+    if (this.label !== previous.label || this.markerOffset !== previous.markerOffset) return false;
+    const checkbox = element.querySelector("input");
+    if (!checkbox || this.checked === null) return false;
+    checkbox.checked = this.checked;
+    return true;
+  }
   toDOM(view: EditorView) {
     const element = document.createElement("span");
     element.className = "file-markdown-bullet";
@@ -269,7 +281,7 @@ class MarkdownBulletWidget extends WidgetType {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = this.checked;
-      checkbox.setAttribute("aria-label", "Toggle task");
+      checkbox.setAttribute("aria-label", m(msg("Toggle task")));
       checkbox.addEventListener("change", () =>
         toggleMarkdownTask(view, this.markerOffset, checkbox.checked),
       );
@@ -581,7 +593,7 @@ function createMarkdownState(
       })),
       EditorView.contentAttributes.of({
         role: "textbox",
-        "aria-label": "Edit Markdown",
+        "aria-label": m(msg("Edit Markdown")),
         "aria-multiline": "true",
         spellcheck: "false",
       }),
@@ -624,8 +636,21 @@ export default function FileMarkdownEditor({
   useLayoutEffect(() => {
     const view = mountEditor(parent.current!);
     editor.current = view;
+    // チェック欄などにある全選択の入力も、原文の選択範囲へ反映する。
+    const selectAllMarkdown = (event: KeyboardEvent) => {
+      if (
+        !event.defaultPrevented &&
+        event.key.toLowerCase() === "a" &&
+        runScopeHandlers(view, event, "editor")
+      ) {
+        event.preventDefault();
+        view.focus();
+      }
+    };
+    view.dom.addEventListener("keydown", selectAllMarkdown);
     return () => {
       editor.current = null;
+      view.dom.removeEventListener("keydown", selectAllMarkdown);
       view.destroy();
     };
   }, []);

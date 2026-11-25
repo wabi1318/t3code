@@ -3,7 +3,6 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
-import { hashTelemetryId } from "@t3tools/shared/telemetryId";
 import {
   bootstrapRemoteBearerSession,
   exchangeRemoteDpopAccessToken,
@@ -340,8 +339,9 @@ describe("remote environment authorization", () => {
         ),
       );
 
-      expect(url.searchParams.get("clientOwner")).toBe(hashTelemetryId("user_connect"));
-      expect(url.searchParams.get("clientDevice")).toBe(hashTelemetryId("device-1"));
+      expect(url.searchParams.get("clientOwner")).toBeNull();
+      expect(url.searchParams.get("clientDevice")).toBeNull();
+      expect(url.searchParams.get("wsTicket")).toBe("ws-ticket");
       expect(url.toString()).not.toContain("user_connect");
       expect(url.toString()).not.toContain("device-1");
     }),

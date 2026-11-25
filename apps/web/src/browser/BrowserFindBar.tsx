@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
 
@@ -23,6 +24,7 @@ export function BrowserFindBar(props: {
   readonly tabId: string;
   readonly webviewRef: RefObject<SearchableBrowserWebview | null>;
 }) {
+  const gt = useGT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<FindResult | null>(null);
@@ -134,14 +136,14 @@ export function BrowserFindBar(props: {
         }
       }}
     >
-      <InputGroup variant="popover" size="lg" role="search" aria-label="Find in page">
+      <InputGroup variant="popover" size="lg" role="search" aria-label={gt("Find in page")}>
         <InputGroupInput
           ref={inputRef}
           type="search"
           size="sm"
           value={query}
-          aria-label="Find in page"
-          placeholder="Find in page"
+          aria-label={gt("Find in page")}
+          placeholder={gt("Find in page")}
           spellCheck={false}
           autoComplete="off"
           onChange={(event) => {
@@ -165,7 +167,7 @@ export function BrowserFindBar(props: {
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="Previous match"
+            aria-label={gt("Previous match")}
             disabled={navigationDisabled}
             onClick={() => searchPage(query, false, false)}
           >
@@ -174,13 +176,13 @@ export function BrowserFindBar(props: {
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="Next match"
+            aria-label={gt("Next match")}
             disabled={navigationDisabled}
             onClick={() => searchPage(query, false)}
           >
             <ChevronDownIcon />
           </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Close find" onClick={closeFind}>
+          <Button size="icon-xs" variant="ghost" aria-label={gt("Close find")} onClick={closeFind}>
             <XIcon />
           </Button>
         </InputGroupAddon>

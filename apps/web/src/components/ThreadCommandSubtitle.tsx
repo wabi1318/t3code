@@ -1,4 +1,5 @@
 import type { ProviderDriverKind } from "@t3tools/contracts";
+import { T } from "gt-react";
 import { FolderGit2Icon, FolderIcon, GitBranchIcon } from "lucide-react";
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
@@ -39,6 +40,7 @@ export function ThreadCommandSubtitle(props: {
   driverKind?: ProviderDriverKind | null;
   providerDisplayName?: string | null;
   acpRegistryAgentId?: string | undefined;
+  brandIcon?: "deepseek" | undefined;
   acpRegistryIconUrl?: string | undefined;
   variant?: ThreadCommandSubtitleVariant;
   className?: string;
@@ -94,6 +96,7 @@ export function ThreadCommandSubtitle(props: {
             driverKind={props.driverKind}
             displayName={props.providerDisplayName ?? props.driverKind}
             acpRegistryAgentId={props.acpRegistryAgentId}
+            brandIcon={props.brandIcon}
             acpRegistryIconUrl={props.acpRegistryIconUrl}
             iconClassName="size-3 shrink-0 opacity-70"
           />
@@ -103,7 +106,9 @@ export function ThreadCommandSubtitle(props: {
       {props.isCurrent ? (
         <>
           {projectLabel || branchLabel || showHarness ? <CommandPaletteMetaDot /> : null}
-          <span className="shrink-0">Current thread</span>
+          <span className="shrink-0">
+            <T>Current thread</T>
+          </span>
         </>
       ) : null}
     </span>

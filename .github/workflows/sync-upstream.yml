@@ -1,0 +1,97 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-upstream-main
+  cancel-in-progress: false
+
+env:
+  ISSUE_LABEL: upstream-sync
+  ISSUE_TITLE: "Upstream sync needs a manual merge"
+
+jobs:
+  sync:
+    if: github.repository == 'sorafujitani/t3code' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout sync helpers
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Merge upstream into main
+        id: merge
+        run: bash .github/scripts/sync-upstream.sh
+
+      - name: Find conflicting files
+        id: conflicts
+        if: steps.merge.outputs.result == 'conflict'
+        run: |
+          upstream=$(gh api "repos/$GH_REPO" --jq .parent.full_name)
+          git init -q sync && cd sync
+          git remote add origin "https://github.com/$GH_REPO.git"
+          git remote add upstream "https://github.com/$upstream.git"
+          git fetch -q --filter=blob:none --no-tags origin main
+          git fetch -q --filter=blob:none --no-tags upstream main
+          git merge-tree --write-tree --name-only --no-messages origin/main upstream/main \
+            > "$RUNNER_TEMP/merge-tree.txt" || true
+          tail -n +2 "$RUNNER_TEMP/merge-tree.txt" > "$RUNNER_TEMP/conflicts.txt"
+          {
+            echo "upstream=$upstream"
+            echo "upstream_sha=$(git rev-parse upstream/main)"
+            echo "fork_sha=$(git rev-parse origin/main)"
+            echo "behind=$(git rev-list --count origin/main..upstream/main)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report conflicts in the tracking issue
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          UPSTREAM: ${{ steps.conflicts.outputs.upstream }}
+          UPSTREAM_SHA: ${{ steps.conflicts.outputs.upstream_sha }}
+          FORK_SHA: ${{ steps.conflicts.outputs.fork_sha }}
+          BEHIND: ${{ steps.conflicts.outputs.behind }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "\`main\` is $BEHIND commits behind [$UPSTREAM](https://github.com/$UPSTREAM) and GitHub cannot merge them automatically."
+            echo
+            echo "Conflicting files:"
+            echo
+            sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt"
+            echo
+            echo "Fork \`main\`: \`$FORK_SHA\`  "
+            echo "Upstream \`main\`: \`$UPSTREAM_SHA\`  "
+            echo "Last checked: $RUN_URL"
+            echo
+            echo "The local launchd job (\`scripts/sync-upstream.sh auto\`) resolves this with Codex and closes this issue."
+            echo "To finish by hand, follow the \`upstream-sync\` skill."
+          } > "$RUNNER_TEMP/issue.md"
+          cat "$RUNNER_TEMP/issue.md" >> "$GITHUB_STEP_SUMMARY"
+          gh label create "$ISSUE_LABEL" --color D93F0B --description "Automated upstream sync" --force
+          issue=$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$RUNNER_TEMP/issue.md"
+          fi
+          echo "::warning::Upstream has conflicts with main: $(paste -sd, "$RUNNER_TEMP/conflicts.txt")"
+
+      - name: Close the tracking issue
+        if: steps.merge.outputs.result == 'synced'
+        run: |
+          for issue in $(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[].number'); do
+            gh issue close "$issue" --comment "Upstream sync succeeded in ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}."
+          done
