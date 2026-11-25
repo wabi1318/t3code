@@ -19,10 +19,16 @@ describe("dialog initial focus", () => {
   it.each([
     { label: "generic", options: undefined, focused: "Cancel", confirmed: false },
     {
-      label: "destructive opt-in",
-      options: { variant: "destructive", initialFocus: "confirm" },
+      label: "destructive",
+      options: { variant: "destructive" },
       focused: "Cancel",
       confirmed: false,
+    },
+    {
+      label: "destructive confirm focus",
+      options: { variant: "destructive", initialFocus: "confirm" },
+      focused: "Confirm",
+      confirmed: true,
     },
     { label: "opt-in", options: { initialFocus: "confirm" }, focused: "Confirm", confirmed: true },
   ] as const)(
