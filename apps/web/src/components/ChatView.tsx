@@ -3835,7 +3835,6 @@ export default function ChatView(props: ChatViewProps) {
                                   isResuming
                                 }
                                 canResume={canResume}
-                                isCompacting={isCompacting}
                                 isRevertingCheckpoint={isRevertingCheckpoint}
                                 sendDisabledReason={
                                   !canOperateThread
