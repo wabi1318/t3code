@@ -906,10 +906,20 @@ describe("evaluatePullRequestWatch", () => {
       remark("agent-user", "2026-10-02T12:05:00Z", "Fixed in the latest push."),
       remark("macroscope-app[bot]", "2026-10-02T12:06:00Z"),
       remark("reviewer", "2026-10-02T11:00:00Z", "Older than the watch."),
+      remark(
+        "agent-user",
+        "2026-10-02T12:07:00Z",
+        "Important 1\n<!-- grokbot-review sha=aaaaaaaaaa -->",
+      ),
+      remark(
+        "agent-user",
+        "2026-10-02T12:08:00Z",
+        "GrokBot reviews end with\n```\n<!-- grokbot-review sha=aaaaaaaaaa -->\n```\nor `<!-- grokbot-review sha=aaaaaaaaaa -->`.",
+      ),
     ];
     const report = evaluatePullRequestWatch(watch(), detail(), comments);
-    assert.deepEqual(report.changes, [{ kind: "remarks", remarks: [comments[1]!] }]);
-    assert.equal(report.next.remarksThrough, "2026-10-02T12:06:00Z");
+    assert.deepEqual(report.changes, [{ kind: "remarks", remarks: [comments[1]!, comments[3]!] }]);
+    assert.equal(report.next.remarksThrough, "2026-10-02T12:07:00Z");
     assert.deepEqual(evaluatePullRequestWatch(report.next, detail(), comments).changes, []);
   });
 
