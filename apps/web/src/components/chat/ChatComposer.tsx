@@ -1,7 +1,6 @@
 import { copySnapshot } from "./copySnapshot";
 import { VoiceInputSetup } from "./VoiceInputSetup";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
-import { useComposerPrediction } from "./useComposerPrediction";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
 import type { ComposerAttachmentInsertion } from "../composerAttachmentInsertion";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -396,7 +395,6 @@ export interface ChatComposerProps {
   isSendBusy: boolean;
   canResume: boolean;
   isRevertingCheckpoint?: boolean;
-  isCompacting?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
   canSteer: boolean;
@@ -546,7 +544,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isSendBusy,
     canResume,
     isRevertingCheckpoint = false,
-    isCompacting = false,
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
     canSteer,
@@ -954,29 +951,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
-  const { prediction: composerPrediction } = useComposerPrediction({
-    environmentId,
-    threadId: activeThreadId,
-    completedRunId:
-      phase !== "running" && !isSendBusy && activeThread?.latestRun?.status === "completed"
-        ? activeThread.latestRun.runId
-        : null,
-    enabled:
-      canOperateThread &&
-      selectedProvider === "codex" &&
-      prompt.length === 0 &&
-      phase !== "running" &&
-      !isSendBusy &&
-      !isCompacting &&
-      !isRevertingCheckpoint &&
-      environmentUnavailable === null &&
-      pendingUserInputs.length === 0 &&
-      pendingApprovals.length === 0 &&
-      editingQueuedAttachments === null &&
-      composerImages.length === 0 &&
-      composerFiles.length === 0 &&
-      composerTerminalContexts.length === 0,
-  });
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
   const providerSetupInstanceId = noProviderAvailable
@@ -3892,7 +3866,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     literalText={isLiteralPendingAnswer}
                     isPathQueryActive={isPathQueryActiveStable}
                     value={activePendingProgress ? activePendingProgress.customAnswer : prompt}
-                    prediction={composerPrediction}
                     cursor={composerCursor}
                     contextRecords={composerContextRecords}
                     buildContextClipboardFragment={buildContextClipboardFragmentStable}
