@@ -13,6 +13,8 @@ export const PULL_REQUEST_WATCH_WAKE_LIMIT = 10;
 export const PULL_REQUEST_WATCH_NO_CHECKS_MS = 15 * 60_000;
 const LISTED_ITEMS = 10;
 const SNIPPET_LENGTH = 200;
+/** Review bots such as GrokBot post with the user's own account, so the marker line they end with sets them apart. */
+const SELF_POSTED_REVIEW_MARKERS = [/(?:^|\n)<!-- grokbot-review sha=[0-9a-f]{7,40} -->$/];
 
 export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
@@ -216,7 +218,8 @@ export function evaluatePullRequestWatch(
     const at = Date.parse(activeAt(remark));
     return (
       (at > through || (at === through && !watch.remarkIds.includes(remark.id))) &&
-      remark.author?.login.toLowerCase() !== own
+      (remark.author?.login.toLowerCase() !== own ||
+        SELF_POSTED_REVIEW_MARKERS.some((marker) => marker.test(remark.body.trimEnd())))
     );
   });
   if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh });
