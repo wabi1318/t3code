@@ -3899,6 +3899,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? gt("Enable a provider in Settings to send a message")
                               : (offeredPromptSuggestion ?? m(DEFAULT_COMPOSER_PLACEHOLDER))
                     }
+                    placeholderClassName={
+                      // The fork owner chose 40% suggestion text so it reads as a hint; the Tab key keeps its own color.
+                      offeredPromptSuggestion !== null ? "text-placeholder/40" : ""
+                    }
                     placeholderSuffix={
                       offeredPromptSuggestion !== null ? (
                         // The placeholder ignores pointer events so clicks reach the editor; only this hint opts back in.
